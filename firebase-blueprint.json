@@ -1,0 +1,206 @@
+{
+  "entities": {
+    "PlaybackPack": {
+      "title": "PlaybackPack",
+      "description": "Represents a playback music pack containing multitrack stems and audio guides",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique pack identifier",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the playback pack",
+          "maxLength": 150
+        },
+        "artist": {
+          "type": "string",
+          "description": "Original performing artist or band",
+          "maxLength": 100
+        },
+        "genre": {
+          "type": "string",
+          "description": "Musical rhythm or genre category",
+          "maxLength": 60
+        },
+        "originalPrice": {
+          "type": "number",
+          "description": "Base price before discount"
+        },
+        "discountPrice": {
+          "type": "number",
+          "description": "Current active offer price"
+        },
+        "badge": {
+          "type": "string",
+          "description": "Optional promotional ribbon badge",
+          "maxLength": 50
+        },
+        "coverImage": {
+          "type": "string",
+          "description": "Cover thumbnail URL",
+          "maxLength": 500
+        },
+        "demoAudioUrl": {
+          "type": "string",
+          "description": "Preview demo MP3 URL",
+          "maxLength": 500
+        }
+      },
+      "required": ["title", "artist", "genre", "discountPrice"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order with checkout and payment metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Order unique id",
+          "maxLength": 64
+        },
+        "orderNumber": {
+          "type": "string",
+          "description": "Display order reference number",
+          "maxLength": 32
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer full name",
+          "maxLength": 100
+        },
+        "customerEmail": {
+          "type": "string",
+          "description": "Customer delivery email address",
+          "maxLength": 120
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "Customer WhatsApp phone number",
+          "maxLength": 30
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Order subtotal"
+        },
+        "discount": {
+          "type": "number",
+          "description": "Coupon discount applied"
+        },
+        "total": {
+          "type": "number",
+          "description": "Final paid amount"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment type selected",
+          "enum": ["pix", "card"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Order status",
+          "enum": ["completed", "pending", "cancelled"]
+        },
+        "date": {
+          "type": "string",
+          "description": "Timestamp string of creation",
+          "maxLength": 50
+        }
+      },
+      "required": ["customerName", "customerEmail", "total", "paymentMethod", "status"]
+    },
+    "SiteSetting": {
+      "title": "SiteSetting",
+      "description": "Storefront customization configuration (theme, banner, logo, menu, footer, cart, checkout)",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Configuration key",
+          "maxLength": 60
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update",
+          "maxLength": 50
+        }
+      },
+      "required": ["key"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator user profile",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Administrator email address",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "description": "Access level",
+          "enum": ["admin", "superadmin"]
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "CustomerProfile": {
+      "title": "CustomerProfile",
+      "description": "Registered customer profile with contact information and purchase preferences",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Customer authentication user id",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Customer email",
+          "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "description": "Customer full name",
+          "maxLength": 100
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer WhatsApp phone",
+          "maxLength": 30
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Registration date",
+          "maxLength": 50
+        }
+      },
+      "required": ["email", "name"]
+    }
+  },
+  "firestore": {
+    "/customers/{customerId}": {
+      "schema": "CustomerProfile",
+      "description": "Customer accounts and profile details"
+    },
+    "/playback_packs/{packId}": {
+      "schema": "PlaybackPack",
+      "description": "Public catalog of multitrack playback packs and musical tracks"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer digital purchase records and download orders"
+    },
+    "/site_settings/{settingId}": {
+      "schema": "SiteSetting",
+      "description": "Dynamic store configuration documents (theme, layout, banner, checkout)"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminUser",
+      "description": "Registered system administrators for backend management"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "JS Playbacks - Loja de Playbacks & Ritmos",
+  "description": "Plataforma oficial de playbacks profissionais, multitracks e ritmos de Forró, Piseiro, Sertanejo, Arrocha e Pagode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
