@@ -168,32 +168,33 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     if (!validateCustomerFields()) return;
 
     setMpLoading(true);
+    setFormError(null);
 
-    const accessToken =
-      checkoutConfig.mercadoPagoAccessToken ||
-      checkoutConfig.creditCardSecretToken ||
-      '';
+    const idempotencyKey = `pix_cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     try {
       const response = await fetch('/api/mercadopago/create-pix', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           amount: total,
           description: `MD Studio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
+          idempotencyKey,
           payer: {
             name: customerName.trim(),
             email: customerEmail.trim(),
             phone: customerPhone,
           },
           items: items.map((i) => ({
+            id: i.pack.id,
             title: i.pack.title,
             quantity: i.quantity,
             unit_price: i.pack.discountPrice,
+            pack: i.pack,
           })),
-          config: {
-            mercadoPagoAccessToken: accessToken,
-          },
         }),
       });
 
@@ -217,13 +218,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       } else {
         setFormError(
           data?.error ||
-            'Não foi possível gerar o QR Code no Mercado Pago. Verifique os dados e tente novamente.'
+            'Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.'
         );
       }
     } catch (err: any) {
       console.warn('Falha na rota Mercado Pago:', err);
       setFormError(
-        'Erro ao conectar com o Mercado Pago. Por favor tente novamente em instantes.'
+        'Falha de comunicação temporária com o Mercado Pago. Por favor tente novamente em instantes.'
       );
     } finally {
       setMpLoading(false);
@@ -242,13 +243,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     const checkStatus = async () => {
       if (!isPollingActive) return;
       try {
-        const token =
-          checkoutConfig.mercadoPagoAccessToken ||
-          checkoutConfig.creditCardSecretToken ||
-          '';
-        const res = await fetch(
-          `/api/mercadopago/payment-status/${mpPaymentId}?token=${encodeURIComponent(token)}`
-        );
+        const res = await fetch(`/api/mercadopago/payment-status/${mpPaymentId}`);
         const json = await res.json();
         if (json.success && json.status === 'approved' && isPollingActive) {
           isPollingActive = false;

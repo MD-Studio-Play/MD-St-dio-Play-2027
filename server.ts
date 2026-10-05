@@ -22,32 +22,30 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Idempotency-Key, Cache-Control, Pragma');
+  res.header('Access-Control-Expose-Headers', 'X-Idempotency-Key');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
   next();
 });
 
-// Helper: Retrieve Access Token from environment or config payload
-function getAccessToken(clientConfig?: any): string {
+// Helper: Retrieve Access Token exclusively from server environment variables (Never expose or trust client config)
+function getAccessToken(): string {
   const token =
-    process.env.MERCADOPAGO_ACCESS_TOKEN ||
     process.env.MERCADO_PAGO_ACCESS_TOKEN ||
-    clientConfig?.mercadoPagoAccessToken ||
-    clientConfig?.creditCardSecretToken ||
+    process.env.MERCADOPAGO_ACCESS_TOKEN ||
     '';
   return token.trim();
 }
 
-// Helper: Retrieve Public Key from environment or config payload
-function getPublicKey(clientConfig?: any): string {
+// Helper: Retrieve Public Key from environment or public config
+function getPublicKey(): string {
   const key =
-    process.env.MERCADOPAGO_PUBLIC_KEY ||
     process.env.MERCADO_PAGO_PUBLIC_KEY ||
-    process.env.VITE_MERCADOPAGO_PUBLIC_KEY ||
+    process.env.MERCADOPAGO_PUBLIC_KEY ||
     process.env.VITE_MERCADO_PAGO_PUBLIC_KEY ||
-    clientConfig?.mercadoPagoPublicKey ||
+    process.env.VITE_MERCADOPAGO_PUBLIC_KEY ||
     '';
   return key.trim();
 }
@@ -149,54 +147,199 @@ function detectCardBrand(num: string): string {
   return 'master';
 }
 
-// Helper: Translate Mercado Pago error codes & messages to user-friendly Portuguese
-function translateMercadoPagoError(mpData: any): string {
-  if (!mpData) return 'Falha na comunicação com o Mercado Pago.';
-
-  const causeCode = String(mpData.cause?.[0]?.code || '');
-  const causeDesc = String(mpData.cause?.[0]?.description || '');
-  const message = String(mpData.message || '');
-  const statusDetail = String(mpData.status_detail || '');
+// Helper: Translate Mercado Pago error codes & messages to user-friendly Portuguese with specific status mapping
+function translateMercadoPagoError(
+  mpData: any,
+  httpStatus?: number
+): { message: string; errorCode: string; isTemporary: boolean } {
+  const causeCode = String(mpData?.cause?.[0]?.code || mpData?.error || '').trim();
+  const causeDesc = String(mpData?.cause?.[0]?.description || '').trim();
+  const message = String(mpData?.message || '').trim();
+  const statusDetail = String(mpData?.status_detail || '').trim();
   const combined = `${causeCode} ${causeDesc} ${message} ${statusDetail}`.toLowerCase();
 
-  if (combined.includes('3034') || combined.includes('card_number_validation')) {
-    return 'Número de cartão inválido ou não autorizado pela conta. Verifique os dados digitados ou utilize o PIX para aprovação imediata.';
-  }
-  if (combined.includes('2006') || combined.includes('card token not found') || combined.includes('invalid card_token_id') || combined.includes('3003')) {
-    return 'Não foi possível validar o token do cartão. Confira os números, validade e CVV ou escolha a opção PIX.';
-  }
-  if (combined.includes('2010') || combined.includes('security_code') || combined.includes('3000')) {
-    return 'Código de segurança (CVV) do cartão inválido.';
-  }
-  if (combined.includes('2007') || combined.includes('expiration_month') || combined.includes('expiration_year') || combined.includes('3001')) {
-    return 'Data de vencimento do cartão inválida ou expirada.';
-  }
-  if (combined.includes('2005') || combined.includes('installments')) {
-    return 'Número de parcelas selecionado inválido.';
-  }
-  if (combined.includes('4020') || combined.includes('notificaction_url')) {
-    return 'URL de notificação de pagamento inválida.';
-  }
-  if (combined.includes('cc_rejected_insufficient_amount')) {
-    return 'Saldo ou limite insuficiente no cartão informado.';
-  }
-  if (combined.includes('cc_rejected_bad_filled_security_code')) {
-    return 'Código de segurança (CVV) incorreto.';
-  }
-  if (combined.includes('cc_rejected_bad_filled_date')) {
-    return 'Data de validade do cartão incorreta.';
-  }
-  if (combined.includes('cc_rejected_bad_filled_other')) {
-    return 'Dados do cartão incorretos. Por favor, confira as informações.';
-  }
-  if (combined.includes('cc_rejected_call_for_authorize')) {
-    return 'Transação bloqueada pela operadora do cartão. Ligue para seu banco ou pague via PIX.';
-  }
-  if (combined.includes('cc_rejected_other_reason')) {
-    return 'Transação não autorizada pela operadora do cartão. Sugerimos pagar via PIX (aprovação em segundos).';
+  // 1. Status 401: Invalid Credentials
+  if (httpStatus === 401 || combined.includes('invalid_token') || combined.includes('unauthorized')) {
+    return {
+      message: 'Credenciais de pagamento inválidas ou expiradas no servidor. Entre em contato com o suporte.',
+      errorCode: 'MP_401_UNAUTHORIZED',
+      isTemporary: false,
+    };
   }
 
-  return causeDesc || message || 'Dados do pagamento não autorizados pelo banco ou operadora. Recomendamos pagar via PIX.';
+  // 2. Status 403: Forbidden / Access Denied
+  if (httpStatus === 403 || combined.includes('forbidden') || combined.includes('collector_id')) {
+    return {
+      message: 'Acesso não autorizado pelo gateway do Mercado Pago. Verifique as permissões da conta comercial.',
+      errorCode: 'MP_403_FORBIDDEN',
+      isTemporary: false,
+    };
+  }
+
+  // 3. Status 404: Endpoint not found
+  if (httpStatus === 404) {
+    return {
+      message: 'Serviço do Mercado Pago temporariamente indisponível (Endpoint não encontrado).',
+      errorCode: 'MP_404_NOT_FOUND',
+      isTemporary: true,
+    };
+  }
+
+  // 4. Status 409: Conflict / Idempotency Duplicate
+  if (httpStatus === 409 || combined.includes('idempotency') || combined.includes('conflict')) {
+    return {
+      message: 'Conflito na solicitação de pagamento. Gerando uma nova tentativa com chave exclusiva...',
+      errorCode: 'MP_409_CONFLICT',
+      isTemporary: true,
+    };
+  }
+
+  // 5. Status 429: Rate Limit Exceeded
+  if (httpStatus === 429 || combined.includes('rate_limit') || combined.includes('too_many_requests')) {
+    return {
+      message: 'Limite temporário de requisições atingido no Mercado Pago. Aguarde alguns segundos e tente novamente.',
+      errorCode: 'MP_429_RATE_LIMIT',
+      isTemporary: true,
+    };
+  }
+
+  // 6. Status 502 / 503 / 504: Temporary Gateway Indisponibility
+  if (httpStatus === 502 || httpStatus === 503 || httpStatus === 504 || combined.includes('bad_gateway') || combined.includes('gateway_timeout')) {
+    return {
+      message: 'O Mercado Pago está temporariamente indisponível. Aguarde alguns instantes e tente gerar o PIX novamente.',
+      errorCode: `MP_${httpStatus || 503}_UNAVAILABLE`,
+      isTemporary: true,
+    };
+  }
+
+  // 7. Status 500: Server Error at Mercado Pago
+  if (httpStatus === 500) {
+    return {
+      message: 'Instabilidade técnica momentânea nos servidores do Mercado Pago. Tente gerar um novo PIX.',
+      errorCode: 'MP_500_SERVER_ERROR',
+      isTemporary: true,
+    };
+  }
+
+  // Specific domain validations
+  if (combined.includes('collector') && combined.includes('payer')) {
+    return {
+      message: 'O e-mail do pagador não pode ser idêntico ao e-mail cadastrado na conta vendedora do Mercado Pago.',
+      errorCode: 'MP_SAME_COLLECTOR_PAYER',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('3034') || combined.includes('card_number_validation')) {
+    return {
+      message: 'Número de cartão inválido ou não autorizado pela conta. Verifique os dados digitados ou utilize o PIX para aprovação imediata.',
+      errorCode: 'MP_INVALID_CARD_NUMBER',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('2006') || combined.includes('card token not found') || combined.includes('invalid card_token_id') || combined.includes('3003')) {
+    return {
+      message: 'Não foi possível validar o token do cartão. Confira os números, validade e CVV ou escolha a opção PIX.',
+      errorCode: 'MP_INVALID_CARD_TOKEN',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('2010') || combined.includes('security_code') || combined.includes('3000')) {
+    return {
+      message: 'Código de segurança (CVV) do cartão inválido.',
+      errorCode: 'MP_INVALID_CVV',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('2007') || combined.includes('expiration_month') || combined.includes('expiration_year') || combined.includes('3001')) {
+    return {
+      message: 'Data de vencimento do cartão inválida ou expirada.',
+      errorCode: 'MP_INVALID_EXPIRATION',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('2005') || combined.includes('installments')) {
+    return {
+      message: 'Número de parcelas selecionado inválido.',
+      errorCode: 'MP_INVALID_INSTALLMENTS',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('4020') || combined.includes('notificaction_url') || combined.includes('notification_url')) {
+    return {
+      message: 'URL de notificação de pagamento inválida.',
+      errorCode: 'MP_INVALID_NOTIFICATION_URL',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_insufficient_amount')) {
+    return {
+      message: 'Saldo ou limite insuficiente no cartão informado.',
+      errorCode: 'MP_CC_INSUFFICIENT_AMOUNT',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_bad_filled_security_code')) {
+    return {
+      message: 'Código de segurança (CVV) incorreto.',
+      errorCode: 'MP_CC_BAD_CVV',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_bad_filled_date')) {
+    return {
+      message: 'Data de validade do cartão incorreta.',
+      errorCode: 'MP_CC_BAD_DATE',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_bad_filled_other')) {
+    return {
+      message: 'Dados do cartão incorretos. Por favor, confira as informações.',
+      errorCode: 'MP_CC_BAD_DETAILS',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_call_for_authorize')) {
+    return {
+      message: 'Transação bloqueada pela operadora do cartão. Ligue para seu banco ou pague via PIX.',
+      errorCode: 'MP_CC_CALL_FOR_AUTHORIZE',
+      isTemporary: false,
+    };
+  }
+
+  if (combined.includes('cc_rejected_other_reason')) {
+    return {
+      message: 'Transação não autorizada pela operadora do cartão. Sugerimos pagar via PIX (aprovação em segundos).',
+      errorCode: 'MP_CC_OTHER_REASON',
+      isTemporary: false,
+    };
+  }
+
+  // 400 Bad Request fallback
+  if (httpStatus === 400) {
+    return {
+      message: causeDesc || message || 'Dados informados no checkout inválidos para processamento pelo Mercado Pago.',
+      errorCode: causeCode || 'MP_400_BAD_REQUEST',
+      isTemporary: false,
+    };
+  }
+
+  return {
+    message: causeDesc || message || 'Não foi possível processar a cobrança no Mercado Pago. Verifique os dados e tente novamente.',
+    errorCode: causeCode || `MP_STATUS_${httpStatus || 'UNKNOWN'}`,
+    isTemporary: true,
+  };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -273,16 +416,20 @@ async function handleCreatePayment(req: Request, res: Response) {
       payer,
       items,
       card,
-      config,
+      idempotencyKey: clientProvidedIdempotency,
     } = req.body;
 
-    const accessToken = getAccessToken(config);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+
+    const accessToken = getAccessToken();
     if (!accessToken || accessToken.length < 10 || accessToken.includes('mock-token')) {
-      return res.status(400).json({
+      console.error('[MERCADO PAGO SECURITY ERROR]: MERCADO_PAGO_ACCESS_TOKEN is missing or invalid in server environment.');
+      return res.status(500).json({
         success: false,
         requiresToken: true,
         error:
-          'Access Token do Mercado Pago não configurado. Adicione MERCADOPAGO_ACCESS_TOKEN no .env ou nas configurações do Painel Admin.',
+          'Sistema de pagamentos em manutenção ou credencial do Mercado Pago ausente no servidor. Entre em contato com o suporte.',
       });
     }
 
@@ -317,10 +464,14 @@ async function handleCreatePayment(req: Request, res: Response) {
       return res.status(400).json({ success: false, error: 'Valor da compra inválido.' });
     }
 
-    // 3. Generate unique order references
+    // 3. Generate unique order references with proper idempotency
     const orderId = `ORD-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const externalReference = `ext_ref_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-    const idempotencyKey = crypto.randomUUID();
+    const headerIdempotency = req.headers['x-idempotency-key'];
+    const rawIdempotency = (clientProvidedIdempotency || (typeof headerIdempotency === 'string' ? headerIdempotency : null));
+    const idempotencyKey = rawIdempotency && rawIdempotency.length >= 8
+      ? String(rawIdempotency).trim()
+      : crypto.randomUUID();
 
     const isCard = paymentMethodType === 'credit_card' || paymentMethodType === 'card';
 
@@ -394,12 +545,14 @@ async function handleCreatePayment(req: Request, res: Response) {
         if (tokenRes.ok && tokenData.id) {
           cardTokenId = tokenData.id;
         } else {
-          const friendlyCardError = translateMercadoPagoError(tokenData);
-          console.info(`[Mercado Pago Card Token Notice]: ${friendlyCardError}`);
-          return res.status(400).json({
+          const { message: friendlyCardError, errorCode } = translateMercadoPagoError(tokenData, tokenRes.status);
+          console.error(
+            `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/card_tokens | HTTP Status: ${tokenRes.status} | Code: ${errorCode} | RawMessage: ${tokenData?.message || 'N/A'}`
+          );
+          return res.status(tokenRes.status || 400).json({
             success: false,
+            errorCode,
             error: friendlyCardError,
-            details: tokenData,
           });
         }
       }
@@ -554,17 +707,27 @@ async function handleCreatePayment(req: Request, res: Response) {
         postSaleUrls,
       });
     } else {
-      const friendlyError = translateMercadoPagoError(mpData);
-      console.info(`[Mercado Pago /v1/payments Notice Status ${mpRes.status}]:`, friendlyError);
+      const { message: friendlyError, errorCode, isTemporary } = translateMercadoPagoError(mpData, mpRes.status);
+      console.error(
+        `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | Code: ${errorCode} | RawMessage: ${mpData?.message || 'N/A'} | Cause: ${JSON.stringify(mpData?.cause || [])}`
+      );
       return res.status(mpRes.status || 400).json({
         success: false,
+        errorCode,
         error: friendlyError,
-        details: mpData,
+        isTemporary,
+        orderId,
+        externalReference,
       });
     }
   } catch (err: any) {
-    console.error('Unexpected error creating Mercado Pago payment:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Erro interno no servidor' });
+    console.error('[MERCADO PAGO AUDIT ERROR] Unexpected Exception:', err);
+    return res.status(500).json({
+      success: false,
+      errorCode: 'MP_INTERNAL_SERVER_ERROR',
+      error: 'Falha temporária ao comunicar com o Mercado Pago. Por favor, tente novamente.',
+      isTemporary: true,
+    });
   }
 }
 
@@ -581,7 +744,7 @@ async function handleCreateCheckoutPro(req: Request, res: Response) {
   try {
     const { payer, items, config } = req.body;
 
-    const accessToken = getAccessToken(config);
+    const accessToken = getAccessToken();
     if (!accessToken || accessToken.length < 10) {
       return res.status(400).json({
         success: false,
@@ -1046,9 +1209,13 @@ app.get('/api/downloads/:orderId/:packId', async (req: Request, res: Response) =
 // 4. API: Payment Status Polling & Firestore Real-Time Synchronizer
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 app.get('/api/mercadopago/payment-status/:id', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const { id } = req.params;
-    const accessToken = getAccessToken({ mercadoPagoAccessToken: req.query.token as string });
+    const accessToken = getAccessToken();
 
     if (!id) {
       return res.status(400).json({ success: false, error: 'ID do pagamento não informado.' });

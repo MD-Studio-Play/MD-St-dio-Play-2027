@@ -203,7 +203,7 @@ const DEFAULT_CHECKOUT: CheckoutConfig = {
   pixTxidPrefix: 'MDST',
   creditCardGateway: 'mercadopago',
   creditCardPublicKey: 'APP_USR-e20b9b98-f894-4c4a-a362-d966053a663f',
-  creditCardSecretToken: 'APP_USR-5316548655442262-070119-f451011a35f5f129f4c1b6fe44cc3cf1-3430570962',
+  creditCardSecretToken: '',
   mercadoPagoAccessToken: '',
   mercadoPagoPublicKey: 'APP_USR-e20b9b98-f894-4c4a-a362-d966053a663f',
   creditCardMaxInstallments: 6,

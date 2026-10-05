@@ -132,8 +132,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         url.hash = '';
         changed = true;
       }
+      let targetPath = url.pathname;
+      if (targetPath.includes('/pagamento/')) {
+        targetPath = '/';
+        changed = true;
+      }
       if (changed) {
-        window.history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : ''));
+        window.history.replaceState(null, '', targetPath + (url.searchParams.toString() ? '?' + url.searchParams.toString() : ''));
       }
     } catch {}
   };
@@ -401,7 +406,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // 1. Process PIX Payment (Real-Time Generation & Polling)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  const handleGeneratePix = async () => {
+  const handleGeneratePix = async (_forceNew: boolean = false) => {
     if (!validateCustomer()) return;
 
     setIsProcessing(true);
@@ -432,29 +437,27 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const description = `MD Stúdio Play - ${titles}`.slice(0, 100);
     const effectiveTotal = totalAmount > 0 ? totalAmount : safeItems.reduce((acc, it) => acc + it.unit_price * it.quantity, 0);
 
-    const accessToken =
-      checkoutConfig.mercadoPagoAccessToken ||
-      checkoutConfig.creditCardSecretToken ||
-      '';
+    // Unique idempotency key per attempt (fresh for every generation)
+    const idempotencyKey = `pix_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     try {
       const response = await fetch('/api/mercadopago/create-payment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           amount: effectiveTotal,
           paymentMethodType: 'pix',
           description,
+          idempotencyKey,
           payer: {
             name: customerName.trim(),
             email: customerEmail.trim(),
             phone: customerPhone,
           },
           items: safeItems,
-          config: {
-            mercadoPagoAccessToken: accessToken,
-            isSandbox: checkoutConfig.isSandbox,
-          },
         }),
       });
 
@@ -485,7 +488,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
-        const errorMsg = data?.error || 'Não foi possível gerar o QR Code no Mercado Pago. Verifique os dados e tente novamente.';
+        const errorMsg = data?.error || 'Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.';
         setErrorType('communication');
         setFormError(errorMsg);
         setViewState('error');
@@ -493,7 +496,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     } catch (err: any) {
       console.warn('Erro ao conectar com API do Mercado Pago:', err);
       setErrorType('communication');
-      setFormError('Falha de conexão com o Mercado Pago. Por favor tente novamente em alguns segundos.');
+      setFormError('Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.');
       setViewState('error');
     } finally {
       setIsProcessing(false);
@@ -505,11 +508,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const handleRegeneratePixFromError = () => {
     cleanUrlParams();
     setFormError(null);
-    setViewState('checkout');
-    if (customerName.trim().length >= 3 && customerEmail.includes('@') && customerPhone.replace(/\D/g, '').length >= 10) {
-      setTimeout(() => {
-        handleGeneratePix();
-      }, 50);
+    if (validateCustomer()) {
+      handleGeneratePix(true);
+    } else {
+      setViewState('checkout');
     }
   };
 
@@ -805,7 +807,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleGeneratePix}
+                  onClick={() => handleGeneratePix()}
                   disabled={isProcessing}
                   className="w-full py-4 rounded-2xl bg-[#1ec75f] hover:bg-[#18b554] text-white font-black text-sm sm:text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(30,199,95,0.4)] transition-all cursor-pointer active:scale-98 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
@@ -1116,36 +1118,53 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
                     : 'bg-red-500/20 text-red-400 border border-red-500/40'
                 }`}>
-                  <span>{errorType === 'communication' ? '⚠️ Erro na comunicação com o Mercado Pago' : '❌ Pagamento recusado'}</span>
+                  <span>{errorType === 'communication' ? '⚠️ Comunicação Mercado Pago' : '❌ Pagamento recusado'}</span>
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-xl font-black text-white">
+              <div className="space-y-1.5">
+                <h3 className="text-xl sm:text-2xl font-black text-white">
                   {errorType === 'communication'
-                    ? 'Não foi possível comunicar com o Mercado Pago'
+                    ? 'Não foi possível gerar o PIX neste momento.'
                     : 'Não foi possível aprovar o pagamento'}
                 </h3>
-                <p className="text-xs text-neutral-300 mt-1.5 max-w-sm mx-auto leading-relaxed">
+                {errorType === 'communication' && (
+                  <p className="text-xs sm:text-sm font-semibold text-amber-400">
+                    Estamos tentando estabelecer comunicação com o Mercado Pago.
+                  </p>
+                )}
+                <p className="text-xs text-neutral-300 mt-1 max-w-sm mx-auto leading-relaxed">
                   {formError || (errorType === 'communication'
-                    ? 'Houve uma falha temporária ao comunicar com a API do Mercado Pago. Você pode tentar gerar novamente sem perder seus dados.'
+                    ? 'Clique no botão abaixo para gerar uma nova cobrança segura.'
                     : 'A operadora não autorizou a transação ou os dados informados possuem divergência.')
                   }
                 </p>
               </div>
 
               <div className="p-4 rounded-2xl bg-[#14161c] border border-white/[0.08] text-xs text-neutral-300 leading-relaxed">
-                Você pode gerar um novo QR Code <strong>PIX Oficial</strong> com valor atualizado para aprovação imediata ou alterar seus dados e tentar novamente.
+                {errorType === 'communication'
+                  ? 'Seus itens e o valor total da compra foram preservados. Clique em "GERAR NOVO PIX" para efetuar uma nova tentativa segura.'
+                  : 'Você pode tentar pagar via PIX Oficial ou conferir os dados e tentar novamente.'}
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5">
                 <button
                   type="button"
                   onClick={handleRegeneratePixFromError}
-                  className="w-full py-3.5 rounded-xl bg-[#1ec75f] hover:bg-[#18b554] text-white font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-md"
+                  disabled={isProcessing}
+                  className="w-full py-3.5 rounded-xl bg-[#1ec75f] hover:bg-[#18b554] text-white font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-md disabled:opacity-50"
                 >
-                  <QrCode className="w-4 h-4" />
-                  <span>Gerar Novo PIX</span>
+                  {isProcessing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>Gerando PIX...</span>
+                    </>
+                  ) : (
+                    <>
+                      <QrCode className="w-4 h-4" />
+                      <span>GERAR NOVO PIX</span>
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -1153,7 +1172,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   onClick={handleTryAgain}
                   className="w-full py-3.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-colors cursor-pointer"
                 >
-                  Voltar / Tentar Novamente
+                  Voltar / Revisar Dados
                 </button>
               </div>
             </div>
