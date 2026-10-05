@@ -3,6 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { PlaybackPack, CartItem } from '../types';
 import { generatePixPayload, generatePixQrCodeDataUrl } from '../utils/pix';
 import QRCode from 'qrcode';
+import confetti from 'canvas-confetti';
 import {
   X,
   ShieldCheck,
@@ -74,6 +75,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerPhoneConfirm, setCustomerPhoneConfirm] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<'refused' | 'communication'>('refused');
 
   // Processing & Verification States
   const [buttonState, setButtonState] = useState<'idle' | 'processing' | 'waiting_confirmation' | 'approved'>('idle');
@@ -102,19 +104,58 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const pollIntervalRef = useRef<any>(null);
   const timerIntervalRef = useRef<any>(null);
 
-  // Check URL parameters when returning from Mercado Pago Checkout Pro
+  // Clean URL parameters and hash to prevent persistent error/status locks
+  const cleanUrlParams = () => {
+    try {
+      const url = new URL(window.location.href);
+      let changed = false;
+      const paramsToRemove = [
+        'status',
+        'collection_status',
+        'payment_id',
+        'collection_id',
+        'external_reference',
+        'preference_id',
+        'payment_type',
+        'merchant_order_id',
+        'merchant_account_id',
+        'processing_mode',
+        'site_id',
+      ];
+      paramsToRemove.forEach((p) => {
+        if (url.searchParams.has(p)) {
+          url.searchParams.delete(p);
+          changed = true;
+        }
+      });
+      if (url.hash.includes('erro') || url.hash.includes('sucesso') || url.hash.includes('pendente')) {
+        url.hash = '';
+        changed = true;
+      }
+      if (changed) {
+        window.history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : ''));
+      }
+    } catch {}
+  };
+
+  // Check URL parameters when returning from Mercado Pago Checkout Pro or direct payment routes
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setViewState('checkout');
+      setFormError(null);
+      return;
+    }
 
     const urlParams = new URLSearchParams(window.location.search);
     const paymentId = urlParams.get('payment_id') || urlParams.get('collection_id');
     const extRef = urlParams.get('external_reference');
     const statusParam = urlParams.get('status') || urlParams.get('collection_status');
     const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
 
-    const isSuccessRoute = path.includes('/pagamento/sucesso') || statusParam === 'approved';
-    const isPendingRoute = path.includes('/pagamento/pendente') || statusParam === 'pending';
-    const isErrorRoute = path.includes('/pagamento/erro') || statusParam === 'rejected' || statusParam === 'failure';
+    const isSuccessRoute = path.includes('/pagamento/sucesso') || hash.includes('sucesso') || statusParam === 'approved';
+    const isPendingRoute = path.includes('/pagamento/pendente') || hash.includes('pendente') || statusParam === 'pending';
+    const isErrorRoute = path.includes('/pagamento/erro') || hash.includes('erro') || statusParam === 'rejected' || statusParam === 'failure';
     const isCancelRoute = path.includes('/pagamento/cancelado') || statusParam === 'null';
 
     if (isSuccessRoute) {
@@ -126,12 +167,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         verifyPaymentOnBackend(paymentId, extRef);
       }
     } else if (isErrorRoute) {
+      setErrorType('refused');
+      setFormError('A operadora ou o Mercado Pago não autorizou a transação.');
       setViewState('error');
     } else if (isCancelRoute) {
       setViewState('checkout');
       setFormError('Pagamento cancelado no Mercado Pago. Você pode tentar novamente quando desejar.');
+      cleanUrlParams();
+    } else if (initialView === 'success') {
+      setViewState('verifying');
+      verifyPaymentOnBackend(paymentId, extRef);
+    } else if (initialView === 'pending') {
+      setViewState('pending');
+    } else if (initialView === 'error') {
+      setErrorType('refused');
+      setViewState('error');
+    } else {
+      setViewState('checkout');
     }
-  }, [isOpen]);
+  }, [isOpen, initialView]);
 
   const verifyPaymentOnBackend = async (paymentId: string | null, externalReference: string | null) => {
     setIsVerifying(true);
@@ -170,10 +224,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           onClearCart();
         } catch {}
 
+        cleanUrlParams();
         setViewState('success');
       } else if (data.status === 'in_process' || data.status === 'pending') {
         setViewState('pending');
       } else if (data.status === 'rejected' || data.status === 'cancelled') {
+        setErrorType('refused');
+        setFormError('A operadora ou o Mercado Pago não autorizou a transação.');
         setViewState('error');
       } else {
         setViewState('checkout');
@@ -181,19 +238,108 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
     } catch (err) {
       console.warn('Notice verifying order:', err);
-      setViewState('checkout');
+      setErrorType('communication');
+      setViewState('error');
       setFormError('Não foi possível verificar a aprovação do pagamento neste momento. Caso tenha pago, você poderá acessar seus produtos na Área do Cliente após aprovação.');
     } finally {
       setIsVerifying(false);
     }
   };
 
-  // Calculate Cart Total (unit prices)
-  const totalAmount = items.reduce((acc, item) => {
+  // Calculate Cart Total in cents to avoid float rounding errors (Anti-Tampering & Exact Centavos)
+  const totalCents = items.reduce((acc, item) => {
     const pack = item?.pack || item;
     const price = Number(pack?.discountPrice ?? (item as any)?.price ?? (item as any)?.unit_price ?? 57.99);
-    return acc + price * (item?.quantity || 1);
+    const qty = Math.max(1, Number(item?.quantity) || 1);
+    return acc + Math.round(price * 100) * qty;
   }, 0);
+
+  const totalAmount = totalCents / 100;
+
+  // Real-time listener: Invalidate outdated QR code if cart total or items change
+  const prevTotalRef = useRef<number>(totalAmount);
+  const prevItemsLengthRef = useRef<number>(items.length);
+
+  useEffect(() => {
+    if (prevTotalRef.current !== totalAmount || prevItemsLengthRef.current !== items.length) {
+      prevTotalRef.current = totalAmount;
+      prevItemsLengthRef.current = items.length;
+      if (viewState === 'pix_display') {
+        setPixQrCode(null);
+        setPixQrCodeBase64(null);
+        setPixPaymentId(null);
+        setViewState('checkout');
+      }
+    }
+  }, [totalAmount, items.length, viewState]);
+
+  // Confetti Animation when Payment is Confirmed by Mercado Pago
+  useEffect(() => {
+    if (viewState === 'success') {
+      try {
+        const count = 200;
+        const defaults = {
+          origin: { y: 0.7 },
+          zIndex: 99999,
+        };
+
+        const fire = (particleRatio: number, opts: confetti.Options) => {
+          confetti({
+            ...defaults,
+            ...opts,
+            particleCount: Math.floor(count * particleRatio),
+          });
+        };
+
+        fire(0.25, {
+          spread: 26,
+          startVelocity: 55,
+        });
+        fire(0.2, {
+          spread: 60,
+        });
+        fire(0.35, {
+          spread: 100,
+          decay: 0.91,
+          scalar: 0.8,
+        });
+        fire(0.1, {
+          spread: 120,
+          startVelocity: 25,
+          decay: 0.92,
+          scalar: 1.2,
+        });
+        fire(0.1, {
+          spread: 120,
+          startVelocity: 45,
+        });
+      } catch (err) {
+        console.warn('Notice: confetti launch error:', err);
+      }
+    }
+  }, [viewState]);
+
+  // Direct redirection to /area-do-cliente on clicking "ACESSAR SUAS COMPRAS"
+  const handleGoToCustomerArea = () => {
+    if (customerPhone) {
+      setPendingWhatsAppPhone(customerPhone);
+      loginCustomerDirectWithPhone(customerPhone).catch(() => {});
+    }
+    cleanUrlParams();
+    onClearCart();
+    onClose();
+    try {
+      window.history.pushState(null, '', '/area-do-cliente');
+    } catch {}
+    setIsCustomerAreaOpen(true);
+  };
+
+  const handleClose = () => {
+    cleanUrlParams();
+    setFormError(null);
+    setViewState('checkout');
+    onClose();
+  };
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -339,78 +485,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
-        // Fallback: If Mercado Pago returned a notice or has temporary outage, use official BACEN PIX BRCode
-        console.warn('Notice from Mercado Pago API, activating official BACEN PIX contingency:', data?.error);
-        const fallbackTxid = `${checkoutConfig.pixTxidPrefix || 'MD'}${Math.floor(100000 + Math.random() * 900000)}`;
-        const fallbackPayload = generatePixPayload({
-          key: checkoutConfig.pixKey || 'comercial@mdstudioplay.com.br',
-          name: checkoutConfig.pixBeneficiaryName || 'MD STUDIO PLAY',
-          city: checkoutConfig.pixBeneficiaryCity || 'SAO PAULO',
-          amount: effectiveTotal,
-          txid: fallbackTxid,
-          description: description.slice(0, 40),
-        });
-
-        const fallbackQrUrl = await generatePixQrCodeDataUrl(fallbackPayload);
-        const fallbackPaymentId = 'pix_' + Date.now();
-
-        setPixPaymentId(fallbackPaymentId);
-        setPixQrCode(fallbackPayload);
-        setPixQrCodeBase64(fallbackQrUrl);
-        setPixTicketUrl(null);
-
-        setCompletedOrder({
-          orderId: `ORD-${Date.now()}`,
-          total: effectiveTotal,
-          paymentMethod: 'PIX',
-          date: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          items: items.map((i) => i?.pack || i),
-          postSaleUrls: safeItems.map((i) => i.postSaleUrl).filter(Boolean) as string[],
-        });
-
-        setViewState('pix_display');
-        setPixCountdown(600);
+        const errorMsg = data?.error || 'Não foi possível gerar o QR Code no Mercado Pago. Verifique os dados e tente novamente.';
+        setErrorType('communication');
+        setFormError(errorMsg);
+        setViewState('error');
       }
     } catch (err: any) {
-      console.warn('Erro ao conectar com API do Mercado Pago, gerando PIX de contingência:', err);
-      try {
-        const fallbackTxid = `${checkoutConfig.pixTxidPrefix || 'MD'}${Math.floor(100000 + Math.random() * 900000)}`;
-        const fallbackPayload = generatePixPayload({
-          key: checkoutConfig.pixKey || 'comercial@mdstudioplay.com.br',
-          name: checkoutConfig.pixBeneficiaryName || 'MD STUDIO PLAY',
-          city: checkoutConfig.pixBeneficiaryCity || 'SAO PAULO',
-          amount: effectiveTotal,
-          txid: fallbackTxid,
-          description: 'MD STUDIO PLAY PIX',
-        });
-
-        const fallbackQrUrl = await generatePixQrCodeDataUrl(fallbackPayload);
-        const fallbackPaymentId = 'pix_' + Date.now();
-
-        setPixPaymentId(fallbackPaymentId);
-        setPixQrCode(fallbackPayload);
-        setPixQrCodeBase64(fallbackQrUrl);
-        setPixTicketUrl(null);
-
-        setCompletedOrder({
-          orderId: `ORD-${Date.now()}`,
-          total: effectiveTotal,
-          paymentMethod: 'PIX',
-          date: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          items: items.map((i) => i?.pack || i),
-          postSaleUrls: safeItems.map((i) => i.postSaleUrl).filter(Boolean) as string[],
-        });
-
-        setViewState('pix_display');
-        setPixCountdown(600);
-      } catch (fallbackErr) {
-        setFormError('Não foi possível gerar o código PIX no momento. Por favor tente novamente.');
-        setViewState('checkout');
-      }
+      console.warn('Erro ao conectar com API do Mercado Pago:', err);
+      setErrorType('communication');
+      setFormError('Falha de conexão com o Mercado Pago. Por favor tente novamente em alguns segundos.');
+      setViewState('error');
     } finally {
       setIsProcessing(false);
       setButtonState('idle');
     }
+  };
+
+  // Regeneration and recovery actions from error screen
+  const handleRegeneratePixFromError = () => {
+    cleanUrlParams();
+    setFormError(null);
+    setViewState('checkout');
+    if (customerName.trim().length >= 3 && customerEmail.includes('@') && customerPhone.replace(/\D/g, '').length >= 10) {
+      setTimeout(() => {
+        handleGeneratePix();
+      }, 50);
+    }
+  };
+
+  const handleTryAgain = () => {
+    cleanUrlParams();
+    setFormError(null);
+    setViewState('checkout');
   };
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -459,6 +565,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             total: totalAmount,
             paymentMethod: 'pix',
             status: 'completed',
+            payment_status: 'approved',
+            order_status: 'PAGAMENTO APROVADO',
             pixPayload: pixQrCode || undefined,
             pixQrCodeUrl: pixQrCodeBase64 || undefined,
             mercadoPagoPaymentId: pixPaymentId,
@@ -469,12 +577,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           setPendingWhatsAppPhone(customerPhone);
           loginCustomerDirectWithPhone(customerPhone).catch(() => {});
           onClearCart();
+          cleanUrlParams();
 
           // Move to Success Screen
           setViewState('success');
-        } else if (data.success && data.status === 'rejected') {
+        } else if (data.success && (data.status === 'rejected' || data.status === 'cancelled')) {
           isPolling = false;
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          setErrorType('refused');
+          setFormError('O pagamento foi recusado ou cancelado pela instituição financeira no Mercado Pago.');
           setViewState('error');
         }
       } catch (err) {
@@ -529,7 +640,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -718,15 +829,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               VIEW 2: TELA DO PIX (QR Code, Copia e Cola & Polling em Tempo Real)
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
           {viewState === 'pix_display' && (
-            <div className="space-y-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="space-y-5 text-center animate-in zoom-in-95 duration-200">
               <div className="p-4 rounded-2xl bg-[#14161c] border border-emerald-500/30 flex flex-col items-center space-y-3">
-                <div className="flex items-center gap-2 text-emerald-400 text-xs font-extrabold uppercase tracking-wider">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs sm:text-sm font-extrabold uppercase tracking-wider">
+                  <span className="text-base">⏳</span>
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Aguardando Pagamento PIX em Tempo Real</span>
+                  <span>AGUARDANDO CONFIRMAÇÃO DO PAGAMENTO</span>
                 </div>
 
                 <p className="text-xs text-neutral-300 max-w-md">
-                  Abra o aplicativo do seu banco, escolha <strong>Pagar com PIX</strong> e aponte a câmera para o QR Code abaixo ou utilize o botão <strong>COPIAR CÓDIGO PIX</strong>:
+                  Abra o app do seu banco, escolha <strong>Pagar com PIX</strong> e aponte a câmera para o QR Code abaixo ou clique em <strong>COPIAR CÓDIGO PIX</strong>:
                 </p>
 
                 {/* QR Code Container */}
@@ -746,8 +858,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                 {/* Value and Countdown Bar */}
                 <div className="flex items-center justify-between w-full max-w-xs px-2 pt-1 text-xs">
-                  <span className="font-bold text-neutral-400">Valor da compra:</span>
-                  <span className="font-black text-yellow-400 text-base font-mono">{formatBRL(totalAmount)}</span>
+                  <span className="font-bold text-neutral-400">Total da compra:</span>
+                  <span className="font-black text-yellow-400 text-base sm:text-lg font-mono">{formatBRL(totalAmount)}</span>
                 </div>
 
                 <div className="flex items-center gap-2 text-[11px] text-neutral-400">
@@ -781,110 +893,118 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </button>
 
                 <p className="text-[11px] text-neutral-400">
-                  Após pagar no seu banco, esta página será atualizada automaticamente em segundos liberando seus downloads.
+                  Após pagar no seu banco, o sistema confirma o pagamento automaticamente em tempo real sem precisar enviar comprovante.
                 </p>
               </div>
 
               {/* Live Polling Spinner Indicator */}
-              <div className="py-2 flex items-center justify-center gap-2 text-xs text-neutral-400">
+              <div className="py-2.5 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center gap-2 text-xs text-neutral-200">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                <span>Verificando recebimento junto ao Mercado Pago...</span>
+                <span className="font-medium">🔄 Verificando confirmação do pagamento junto ao Mercado Pago...</span>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setViewState('checkout')}
+                className="text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              >
+                ← Voltar para o carrinho / Alterar dados
+              </button>
             </div>
           )}
 
           {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-              VIEW 3: PÁGINA / TELA DE SUCESSO (/pagamento/sucesso)
+              VIEW 3: POP-UP DE PAGAMENTO APROVADO & CONFIRMADO
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
           {viewState === 'success' && (
-            <div className="space-y-6 text-center animate-in zoom-in-95 duration-200">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_40px_rgba(16,185,129,0.4)]">
-                <CheckCircle2 className="w-10 h-10" />
+            <div className="space-y-6 text-center animate-in zoom-in-95 duration-300 py-2 sm:py-3">
+              {/* Emoji Festivo e Badge de Aprovação */}
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <div className="text-6xl sm:text-7xl animate-bounce select-none">🎉</div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-black uppercase tracking-wider">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>PAGAMENTO APROVADO</span>
+                </div>
               </div>
 
-              <div>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-black uppercase tracking-wider mb-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>PAGAMENTO APROVADO · PRODUTO LIBERADO</span>
-                </div>
-                <h3 className="text-xl sm:text-2xl font-black text-white">Compra Confirmada com Sucesso!</h3>
-                <p className="text-xs text-neutral-300 mt-1">
-                  Seu pedido foi autenticado e validado diretamente no Mercado Pago. Seus arquivos estão liberados para download!
+              {/* Mensagens Obrigatórias */}
+              <div className="space-y-1">
+                <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  Pagamento confirmado!
+                </h3>
+                <p className="text-sm sm:text-base font-bold text-emerald-400">
+                  Seu pagamento foi aprovado com sucesso.
+                </p>
+                <p className="text-xs sm:text-sm text-neutral-300">
+                  Suas compras já estão disponíveis na Área do Cliente.
                 </p>
               </div>
 
-              {isVerifying && (
-                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-blue-300 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-                  <span>Sincronizando confirmação oficial com o Mercado Pago...</span>
-                </div>
-              )}
-
-              {/* Receipt Information Box */}
-              <div className="bg-[#14161c] border border-white/[0.08] rounded-2xl p-4 sm:p-5 text-left text-xs space-y-2.5">
+              {/* Informações Oficiais do Pedido */}
+              <div className="bg-[#14161c] border border-white/[0.08] rounded-2xl p-4 sm:p-5 text-left text-xs space-y-2.5 shadow-xl">
                 <div className="flex justify-between border-b border-white/[0.08] pb-2">
                   <span className="text-neutral-400">Identificação do Pedido:</span>
                   <span className="font-bold text-white font-mono">{completedOrder?.orderId || '#ORD-CONFIRMADO'}</span>
                 </div>
 
                 <div className="flex justify-between border-b border-white/[0.08] pb-2">
+                  <span className="text-neutral-400">Status:</span>
+                  <span className="font-black text-emerald-400 uppercase flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>PAGAMENTO APROVADO</span>
+                  </span>
+                </div>
+
+                <div className="flex justify-between border-b border-white/[0.08] pb-2">
                   <span className="text-neutral-400">Valor Total Pago:</span>
-                  <span className="font-bold text-yellow-400 font-mono text-sm">{formatBRL(completedOrder?.total || totalAmount)}</span>
+                  <span className="font-black text-yellow-400 font-mono text-sm sm:text-base">
+                    {formatBRL(completedOrder?.total || totalAmount)}
+                  </span>
                 </div>
 
                 <div className="flex justify-between border-b border-white/[0.08] pb-2">
-                  <span className="text-neutral-400">Forma de Pagamento:</span>
-                  <span className="font-bold text-white uppercase">{completedOrder?.paymentMethod || 'PIX MERCADO PAGO'}</span>
-                </div>
-
-                <div className="flex justify-between border-b border-white/[0.08] pb-2">
-                  <span className="text-neutral-400">Status no Sistema:</span>
-                  <span className="font-black text-emerald-400 uppercase">PAGO & LIBERADO</span>
+                  <span className="text-neutral-400">Data da Compra:</span>
+                  <span className="font-bold text-white">{completedOrder?.date || new Date().toLocaleString('pt-BR')}</span>
                 </div>
 
                 <div className="flex justify-between">
-                  <span className="text-neutral-400">Data e Hora:</span>
-                  <span className="font-bold text-white">{completedOrder?.date || new Date().toLocaleString('pt-BR')}</span>
+                  <span className="text-neutral-400">WhatsApp Vinculado:</span>
+                  <span className="font-bold text-white font-mono">{customerPhone}</span>
                 </div>
               </div>
 
-              {/* Download Buttons for Purchased Items */}
+              {/* Lista dos Produtos Adquiridos com Links */}
               {completedOrder?.items && completedOrder.items.length > 0 && (
                 <div className="space-y-2 text-left bg-black/40 p-4 rounded-2xl border border-emerald-500/30">
-                  <span className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4" />
-                    <span>Seus Produtos Prontos para Download:</span>
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4" />
+                      <span>Produtos Prontos para Download:</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-neutral-400">
+                      {completedOrder.items.length} {completedOrder.items.length === 1 ? 'item' : 'itens'}
+                    </span>
+                  </div>
 
-                  <div className="space-y-2 pt-1">
+                  <div className="space-y-2 pt-1 max-h-48 overflow-y-auto pr-1">
                     {completedOrder.items.map((it: any, idx: number) => {
                       const itemTitle = it.title || it.pack?.title || 'Produto Adquirido';
                       const postSale = it.postSaleUrl || it.pack?.postSaleUrl || completedOrder.postSaleUrls?.[idx] || completedOrder.postSaleUrls?.[0];
                       return (
-                        <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-[#14161c] border border-white/5">
-                          <span className="text-xs font-bold text-white truncate max-w-[200px]">{itemTitle}</span>
+                        <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-[#14161c] border border-white/5 gap-2">
+                          <span className="text-xs font-bold text-white truncate max-w-[200px] sm:max-w-xs">{itemTitle}</span>
                           {postSale ? (
                             <a
                               href={postSale}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="px-3.5 py-1.5 rounded-lg bg-[#00d06c] hover:bg-[#00b85f] text-black font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                              className="px-3.5 py-1.5 rounded-lg bg-[#00d06c] hover:bg-[#00b85f] text-black font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition-all shrink-0"
                             >
                               <Download className="w-3.5 h-3.5" />
-                              <span>BAIXAR PRODUTO</span>
+                              <span>BAIXAR</span>
                             </a>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onClose();
-                                setIsCustomerAreaOpen(true);
-                              }}
-                              className="px-3.5 py-1.5 rounded-lg bg-[#00d06c] hover:bg-[#00b85f] text-black font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span>BAIXAR PRODUTO</span>
-                            </button>
+                            <span className="text-[10px] text-emerald-400 font-bold px-2 py-1 rounded bg-emerald-500/10">Liberado</span>
                           )}
                         </div>
                       );
@@ -893,38 +1013,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               )}
 
-              {/* Direct Access Notification to Customer Area */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-[#14161c] border border-[#00d06c]/30 text-center space-y-3">
-                <div className="flex items-center justify-center gap-2 text-[#00d06c] font-bold text-xs uppercase tracking-wider">
-                  <Sparkles className="w-4 h-4 text-[#00d06c]" />
-                  <span>Área do Cliente Liberada Permanentemente</span>
-                </div>
-                <p className="text-xs text-neutral-300 max-w-md mx-auto leading-relaxed">
-                  Você também pode acessar e baixar todos os seus produtos a qualquer momento na sua <strong>Área do Cliente</strong> informando seu WhatsApp.
-                </p>
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      setIsCustomerAreaOpen(true);
-                    }}
-                    className="w-full py-4 rounded-2xl bg-[#00d06c] hover:bg-[#00b85f] text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(0,208,108,0.4)] transition-all cursor-pointer active:scale-98"
-                  >
-                    <ShoppingBag className="w-5 h-5 text-black" />
-                    <span>ACESSAR MINHA ÁREA DO CLIENTE</span>
-                  </button>
-                </div>
+              {/* Botão em Grande Destaque: "ACESSAR SUAS COMPRAS" */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleGoToCustomerArea}
+                  className="w-full py-4 sm:py-4.5 rounded-2xl bg-[#00d06c] hover:bg-[#00b85f] text-black font-black text-base sm:text-lg uppercase tracking-wider flex items-center justify-center gap-3 shadow-[0_0_35px_rgba(0,208,108,0.5)] transition-all cursor-pointer active:scale-98"
+                >
+                  <ShoppingBag className="w-6 h-6 text-black" />
+                  <span>ACESSAR SUAS COMPRAS</span>
+                </button>
               </div>
 
-              {/* Action Buttons */}
+              {/* Link Secundário */}
               <div className="flex items-center justify-center pt-1">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
                 >
-                  Continuar Navegando na Loja Virtual
+                  Continuar Navegando na Loja
                 </button>
               </div>
             </div>
@@ -980,7 +1088,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  handleClose();
                   setIsCustomerAreaOpen(true);
                 }}
                 className="w-full py-3.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-extrabold text-xs transition-colors cursor-pointer"
@@ -995,30 +1103,46 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
           {viewState === 'error' && (
             <div className="space-y-6 text-center animate-in zoom-in-95 duration-200">
-              <div className="w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-400 text-red-400 flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(239,68,68,0.3)]">
-                <AlertCircle className="w-10 h-10" />
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto shadow-lg ${
+                  errorType === 'communication'
+                    ? 'bg-amber-500/20 border-2 border-amber-400 text-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)]'
+                    : 'bg-red-500/20 border-2 border-red-400 text-red-400 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
+                }`}>
+                  <AlertCircle className="w-10 h-10" />
+                </div>
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                  errorType === 'communication'
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                    : 'bg-red-500/20 text-red-400 border border-red-500/40'
+                }`}>
+                  <span>{errorType === 'communication' ? '⚠️ Erro na comunicação com o Mercado Pago' : '❌ Pagamento recusado'}</span>
+                </div>
               </div>
 
               <div>
-                <h3 className="text-xl font-black text-white">Não foi possível aprovar o pagamento</h3>
-                <p className="text-xs text-neutral-300 mt-1 max-w-sm mx-auto">
-                  {formError || 'A operadora não autorizou a transação ou os dados informados possuem divergência.'}
+                <h3 className="text-xl font-black text-white">
+                  {errorType === 'communication'
+                    ? 'Não foi possível comunicar com o Mercado Pago'
+                    : 'Não foi possível aprovar o pagamento'}
+                </h3>
+                <p className="text-xs text-neutral-300 mt-1.5 max-w-sm mx-auto leading-relaxed">
+                  {formError || (errorType === 'communication'
+                    ? 'Houve uma falha temporária ao comunicar com a API do Mercado Pago. Você pode tentar gerar novamente sem perder seus dados.'
+                    : 'A operadora não autorizou a transação ou os dados informados possuem divergência.')
+                  }
                 </p>
               </div>
 
-              <div className="p-4 rounded-2xl bg-[#14161c] border border-white/[0.08] text-xs text-neutral-400">
-                Você pode gerar um novo QR Code <strong>PIX</strong> para aprovação imediata ou verificar seus dados e tentar novamente.
+              <div className="p-4 rounded-2xl bg-[#14161c] border border-white/[0.08] text-xs text-neutral-300 leading-relaxed">
+                Você pode gerar um novo QR Code <strong>PIX Oficial</strong> com valor atualizado para aprovação imediata ou alterar seus dados e tentar novamente.
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    setPaymentMethod('pix');
-                    setViewState('checkout');
-                    setFormError(null);
-                  }}
-                  className="w-full py-3.5 rounded-xl bg-[#1ec75f] hover:bg-[#18b554] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                  onClick={handleRegeneratePixFromError}
+                  className="w-full py-3.5 rounded-xl bg-[#1ec75f] hover:bg-[#18b554] text-white font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-md"
                 >
                   <QrCode className="w-4 h-4" />
                   <span>Gerar Novo PIX</span>
@@ -1026,13 +1150,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setViewState('checkout');
-                    setFormError(null);
-                  }}
+                  onClick={handleTryAgain}
                   className="w-full py-3.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-colors cursor-pointer"
                 >
-                  Tentar Novamente
+                  Voltar / Tentar Novamente
                 </button>
               </div>
             </div>

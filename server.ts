@@ -85,21 +85,11 @@ function mapOrderStatus(mpStatus: string): {
 
 // Helper: Recalculate and validate total purchase value on backend (Anti-Tampering)
 function calculateRealOrderTotal(items: any[]): { total: number; postSaleUrls: string[]; validatedItems: any[] } {
-  const fallbackItem = {
-    id: 'pack_flyer_150_mega',
-    title: 'Produto MD Stúdio Play',
-    quantity: 1,
-    unit_price: 57.99,
-    total: 57.99,
-    postSaleUrl: null,
-    coverImage: null,
-  };
-
   if (!Array.isArray(items) || items.length === 0) {
-    return { total: 57.99, postSaleUrls: [], validatedItems: [fallbackItem] };
+    return { total: 0, postSaleUrls: [], validatedItems: [] };
   }
 
-  let total = 0;
+  let totalCents = 0;
   const postSaleUrls: string[] = [];
   const validatedItems: any[] = [];
 
@@ -113,8 +103,9 @@ function calculateRealOrderTotal(items: any[]): { total: number; postSaleUrls: s
       unitPrice = 57.99;
     }
 
-    const itemTotal = Number((unitPrice * qty).toFixed(2));
-    total += itemTotal;
+    const itemTotalCents = Math.round(unitPrice * 100) * qty;
+    totalCents += itemTotalCents;
+    const itemTotal = itemTotalCents / 100;
 
     let postSale = pack.postSaleUrl || item.postSaleUrl;
     if (!postSale) {
@@ -139,11 +130,7 @@ function calculateRealOrderTotal(items: any[]): { total: number; postSaleUrls: s
     });
   }
 
-  if (validatedItems.length === 0) {
-    validatedItems.push(fallbackItem);
-    total = 57.99;
-  }
-
+  const total = totalCents / 100;
   return {
     total: Number(total.toFixed(2)),
     postSaleUrls,
@@ -1092,19 +1079,55 @@ app.get('/api/mercadopago/payment-status/:id', async (req: Request, res: Respons
       const { orderStatus, simpleStatus } = mapOrderStatus(status);
 
       // Synchronize status in Firestore orders and payments
+      let matchedOrderData: any = null;
       try {
-        const orderSnap = await getDocs(
+        let orderSnap = await getDocs(
           query(collection(db, 'orders'), where('payment_id', '==', String(id)))
         );
 
+        if (orderSnap.empty && data.external_reference) {
+          orderSnap = await getDocs(
+            query(collection(db, 'orders'), where('external_reference', '==', String(data.external_reference)))
+          );
+        }
+
         if (!orderSnap.empty) {
           const orderDocRef = orderSnap.docs[0].ref;
+          matchedOrderData = orderSnap.docs[0].data();
+
+          // Security check: Validate that paid amount matches expected order total
+          if (isApproved && matchedOrderData && matchedOrderData.total) {
+            const expectedTotal = Number(matchedOrderData.total);
+            const paidAmount = Number(data.transaction_amount);
+            if (Math.abs(expectedTotal - paidAmount) > 0.05) {
+              console.error(`[Security Warning]: Amount divergence. Expected: ${expectedTotal}, Received: ${paidAmount}`);
+              await updateDoc(orderDocRef, {
+                payment_status: 'divergent_amount',
+                order_status: 'VALOR DIVERGENTE - EM ANÁLISE',
+                status: 'pending',
+                updated_at: new Date().toISOString(),
+              });
+              return res.status(400).json({
+                success: false,
+                isApproved: false,
+                error: 'O valor pago difere do total do pedido. Liberação suspensa para verificação.',
+              });
+            }
+          }
+
           await updateDoc(orderDocRef, {
             payment_status: status,
             order_status: orderStatus,
             status: simpleStatus,
             updated_at: new Date().toISOString(),
           });
+
+          matchedOrderData = {
+            ...matchedOrderData,
+            payment_status: status,
+            order_status: orderStatus,
+            status: simpleStatus,
+          };
         }
 
         const paymentRef = doc(db, 'payments', String(id));
@@ -1131,6 +1154,7 @@ app.get('/api/mercadopago/payment-status/:id', async (req: Request, res: Respons
         isApproved,
         dateApproved: data.date_approved || data.date_last_updated,
         amount: data.transaction_amount,
+        order: matchedOrderData,
       });
     }
 

@@ -444,7 +444,10 @@ export default function App() {
       {/* Professional Mercado Pago Checkout Modal */}
       <CheckoutModal
         isOpen={isCheckoutModalOpen}
-        onClose={() => setIsCheckoutModalOpen(false)}
+        onClose={() => {
+          setIsCheckoutModalOpen(false);
+          setCheckoutInitialView('checkout');
+        }}
         items={cartItems}
         onClearCart={handleClearCart}
         initialView={checkoutInitialView}

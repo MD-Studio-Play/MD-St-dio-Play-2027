@@ -80,11 +80,32 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   // Completed order reference
   const [completedOrderPacks, setCompletedOrderPacks] = useState<PlaybackPack[]>([]);
 
-  // Subtotal (No coupons applied as requested)
-  const total = items.reduce(
-    (acc, item) => acc + item.pack.discountPrice * item.quantity,
+  // Subtotal calculated in cents to avoid precision errors
+  const totalCents = items.reduce(
+    (acc, item) =>
+      acc +
+      Math.round(Number(item.pack.discountPrice || 57.99) * 100) *
+        Math.max(1, Number(item.quantity) || 1),
     0
   );
+  const total = totalCents / 100;
+
+  // Real-time invalidation: reset QR code if cart total or items change
+  const prevTotalRef = useRef<number>(total);
+  const prevItemsLengthRef = useRef<number>(items.length);
+
+  useEffect(() => {
+    if (prevTotalRef.current !== total || prevItemsLengthRef.current !== items.length) {
+      prevTotalRef.current = total;
+      prevItemsLengthRef.current = items.length;
+      if (mpQrCode) {
+        setMpQrCode(null);
+        setMpQrCodeBase64(null);
+        setMpPaymentId(null);
+        setMpTicketUrl(null);
+      }
+    }
+  }, [total, items.length, mpQrCode]);
 
   const formatCurrency = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -176,51 +197,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (data.success && data.qrCode) {
+      if (data && data.success && data.qrCode && data.paymentId) {
         setMpQrCode(data.qrCode);
         setMpPaymentId(data.paymentId);
         setMpTicketUrl(data.ticketUrl || null);
 
         if (data.qrCodeBase64) {
-          setMpQrCodeBase64(`data:image/png;base64,${data.qrCodeBase64}`);
+          setMpQrCodeBase64(
+            data.qrCodeBase64.startsWith('data:')
+              ? data.qrCodeBase64
+              : `data:image/png;base64,${data.qrCodeBase64}`
+          );
         } else {
           const generatedUrl = await generatePixQrCodeDataUrl(data.qrCode);
           setMpQrCodeBase64(generatedUrl);
         }
       } else {
-        // Fallback: If Mercado Pago requires a token or returned an error, generate standard compliant BACEN PIX
-        const fallbackTxid = `${checkoutConfig.pixTxidPrefix || 'MD'}${Math.floor(100000 + Math.random() * 900000)}`;
-        const fallbackPayload = generatePixPayload({
-          key: checkoutConfig.pixKey || 'comercial@mdstudioplay.com.br',
-          name: checkoutConfig.pixBeneficiaryName || 'MD STUDIO PLAY',
-          city: checkoutConfig.pixBeneficiaryCity || 'SAO PAULO',
-          amount: total,
-          txid: fallbackTxid,
-          description: 'MD STUDIO PLAY PIX',
-        });
-
-        const fallbackQrUrl = await generatePixQrCodeDataUrl(fallbackPayload);
-        setMpQrCode(fallbackPayload);
-        setMpQrCodeBase64(fallbackQrUrl);
-        setMpPaymentId('demo_' + Date.now());
+        setFormError(
+          data?.error ||
+            'Não foi possível gerar o QR Code no Mercado Pago. Verifique os dados e tente novamente.'
+        );
       }
     } catch (err: any) {
-      console.warn('Falha na rota Mercado Pago, usando contingência BACEN PIX:', err);
-      const fallbackTxid = `${checkoutConfig.pixTxidPrefix || 'MD'}${Math.floor(100000 + Math.random() * 900000)}`;
-      const fallbackPayload = generatePixPayload({
-        key: checkoutConfig.pixKey || 'comercial@mdstudioplay.com.br',
-        name: checkoutConfig.pixBeneficiaryName || 'MD STUDIO PLAY',
-        city: checkoutConfig.pixBeneficiaryCity || 'SAO PAULO',
-        amount: total,
-        txid: fallbackTxid,
-        description: 'MD STUDIO PLAY PIX',
-      });
-      const fallbackQrUrl = await generatePixQrCodeDataUrl(fallbackPayload);
-      setMpQrCode(fallbackPayload);
-      setMpQrCodeBase64(fallbackQrUrl);
-      setMpPaymentId('demo_' + Date.now());
+      console.warn('Falha na rota Mercado Pago:', err);
+      setFormError(
+        'Erro ao conectar com o Mercado Pago. Por favor tente novamente em instantes.'
+      );
     } finally {
       setMpLoading(false);
     }
