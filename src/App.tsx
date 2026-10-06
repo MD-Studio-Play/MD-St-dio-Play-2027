@@ -65,18 +65,23 @@ export default function App() {
     const hash = window.location.hash.toLowerCase();
     if (path.includes('/area-do-cliente') || hash.includes('area-do-cliente')) {
       setIsCustomerAreaOpen(true);
+      window.history.replaceState(null, '', '/');
     } else if (path.includes('/pagamento/sucesso') || hash.includes('sucesso')) {
       setCheckoutInitialView('success');
       setIsCheckoutModalOpen(true);
+      window.history.replaceState(null, '', '/');
     } else if (path.includes('/pagamento/pendente') || hash.includes('pendente')) {
       setCheckoutInitialView('pending');
       setIsCheckoutModalOpen(true);
+      window.history.replaceState(null, '', '/');
     } else if (path.includes('/pagamento/erro') || hash.includes('erro')) {
       setCheckoutInitialView('error');
       setIsCheckoutModalOpen(true);
+      window.history.replaceState(null, '', '/');
     } else if (path.includes('/checkout') || hash.includes('checkout')) {
       setCheckoutInitialView('checkout');
       setIsCheckoutModalOpen(true);
+      window.history.replaceState(null, '', '/');
     }
   }, [setIsCustomerAreaOpen]);
 
@@ -451,6 +456,7 @@ export default function App() {
         items={cartItems}
         onClearCart={handleClearCart}
         initialView={checkoutInitialView}
+        onResetInitialView={() => setCheckoutInitialView('checkout')}
       />
 
       {/* Side Menu Drawer */}
