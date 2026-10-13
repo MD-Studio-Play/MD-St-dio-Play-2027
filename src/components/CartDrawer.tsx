@@ -173,6 +173,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     const idempotencyKey = `pix_cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
       const response = await fetch('/api/mercadopago/create-pix', {
         method: 'POST',
         headers: {
@@ -180,7 +183,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           'X-Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
-          amount: total,
+          amount: Number(total.toFixed(2)),
           description: `MD Studio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
           idempotencyKey,
           payer: {
@@ -193,11 +196,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             title: i.pack.title,
             quantity: i.quantity,
             unit_price: i.pack.discountPrice,
-            pack: i.pack,
+            postSaleUrl: i.pack.postSaleUrl,
           })),
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       const data = await response.json().catch(() => null);
 
       if (data && data.success && data.qrCode && data.paymentId) {

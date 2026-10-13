@@ -36,6 +36,7 @@ interface CheckoutModalProps {
   items: CartItem[];
   onClearCart: () => void;
   initialView?: 'checkout' | 'success' | 'pending' | 'error';
+  onResetInitialView?: () => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -44,6 +45,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
   onClearCart,
   initialView = 'checkout',
+  onResetInitialView,
 }) => {
   const {
     checkoutConfig,
@@ -341,6 +343,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handleClose = () => {
     cleanUrlParams();
+    onResetInitialView?.();
     setFormError(null);
     setViewState('checkout');
     onClose();
@@ -413,12 +416,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setButtonState('processing');
     setFormError(null);
 
+    // Sanitize item list to keep payload compact and prevent network latency/size issues
     const safeItems = (items && items.length > 0 ? items : [{
       pack: {
         id: 'pack_flyer_150_mega',
         title: 'Produto MD Stúdio Play',
         discountPrice: 57.99,
-        image: '',
       },
       quantity: 1,
     }]).map((i) => {
@@ -429,7 +432,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         quantity: Math.max(1, Number(i?.quantity) || 1),
         unit_price: Number(pack?.discountPrice ?? (i as any)?.unit_price ?? (i as any)?.price ?? 57.99),
         postSaleUrl: (pack as any)?.postSaleUrl,
-        image: (pack as any)?.image,
       };
     });
 
@@ -437,10 +439,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const description = `MD Stúdio Play - ${titles}`.slice(0, 100);
     const effectiveTotal = totalAmount > 0 ? totalAmount : safeItems.reduce((acc, it) => acc + it.unit_price * it.quantity, 0);
 
-    // Unique idempotency key per attempt (fresh for every generation)
+    // Unique fresh idempotency key per payment attempt
     const idempotencyKey = `pix_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
       const response = await fetch('/api/mercadopago/create-payment', {
         method: 'POST',
         headers: {
@@ -448,7 +453,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           'X-Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
-          amount: effectiveTotal,
+          amount: Number(effectiveTotal.toFixed(2)),
           paymentMethodType: 'pix',
           description,
           idempotencyKey,
@@ -459,8 +464,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           },
           items: safeItems,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       const data = await response.json().catch(() => null);
 
       if (data && data.success && data.paymentId && data.qrCode) {
@@ -485,6 +492,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           ticketUrl: data.ticketUrl,
         });
 
+        onResetInitialView?.();
+        cleanUrlParams();
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
@@ -507,6 +516,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Regeneration and recovery actions from error screen
   const handleRegeneratePixFromError = () => {
     cleanUrlParams();
+    onResetInitialView?.();
     setFormError(null);
     if (validateCustomer()) {
       handleGeneratePix(true);
@@ -517,6 +527,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handleTryAgain = () => {
     cleanUrlParams();
+    onResetInitialView?.();
     setFormError(null);
     setViewState('checkout');
   };

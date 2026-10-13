@@ -16,16 +16,18 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Enable CORS for all incoming API requests and preflight OPTIONS
+// Enable robust cross-browser CORS for all incoming API requests and preflight OPTIONS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Idempotency-Key, Cache-Control, Pragma');
-  res.header('Access-Control-Expose-Headers', 'X-Idempotency-Key');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Expose-Headers', '*');
+  res.header('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.status(204).end();
   }
   next();
 });
@@ -597,7 +599,7 @@ async function handleCreatePayment(req: Request, res: Response) {
           email,
           first_name: firstName,
           last_name: lastName,
-          ...(cleanCpf ? {
+          ...(cleanCpf && cleanCpf.length === 11 && isValidCPF(cleanCpf) ? {
             identification: {
               type: 'CPF',
               number: cleanCpf,
@@ -623,9 +625,13 @@ async function handleCreatePayment(req: Request, res: Response) {
       body: JSON.stringify(paymentPayload),
     });
 
-    const mpData: any = await mpRes.json();
+    const mpRequestId = mpRes.headers.get('x-request-id') || mpRes.headers.get('traceparent') || `req_${Date.now()}`;
+    const mpData: any = await mpRes.json().catch(() => ({}));
 
     if (mpRes.ok && mpData.id) {
+      console.info(
+        `[MERCADO PAGO AUDIT SUCCESS] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | PaymentId: ${mpData.id} | Amount: R$ ${calculatedTotal.toFixed(2)}`
+      );
       const paymentId = String(mpData.id);
       const mpStatus = String(mpData.status || 'pending');
       const statusDetail = String(mpData.status_detail || '');
@@ -709,7 +715,7 @@ async function handleCreatePayment(req: Request, res: Response) {
     } else {
       const { message: friendlyError, errorCode, isTemporary } = translateMercadoPagoError(mpData, mpRes.status);
       console.error(
-        `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | Code: ${errorCode} | RawMessage: ${mpData?.message || 'N/A'} | Cause: ${JSON.stringify(mpData?.cause || [])}`
+        `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | Code: ${errorCode} | RawMessage: ${mpData?.message || 'N/A'} | Cause: ${JSON.stringify(mpData?.cause || [])}`
       );
       return res.status(mpRes.status || 400).json({
         success: false,
@@ -718,6 +724,7 @@ async function handleCreatePayment(req: Request, res: Response) {
         isTemporary,
         orderId,
         externalReference,
+        requestId: mpRequestId,
       });
     }
   } catch (err: any) {
