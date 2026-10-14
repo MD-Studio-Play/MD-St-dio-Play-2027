@@ -197,11 +197,14 @@ const DEFAULT_CART: CartConfig = {
 };
 
 const DEFAULT_CHECKOUT: CheckoutConfig = {
-  creditCardGateway: 'mercadopago',
-  creditCardPublicKey: 'APP_USR-e20b9b98-f894-4c4a-a362-d966053a663f',
+  pixGateway: 'abacatepay',
+  abacatePayApiKey: '',
+  abacatePayWebhookSecret: '',
+  creditCardGateway: 'abacatepay',
+  creditCardPublicKey: '',
   creditCardSecretToken: '',
   mercadoPagoAccessToken: '',
-  mercadoPagoPublicKey: 'APP_USR-e20b9b98-f894-4c4a-a362-d966053a663f',
+  mercadoPagoPublicKey: '',
   creditCardMaxInstallments: 6,
   creditCardInstallmentsFree: 3,
   creditCardInterestRate: 2.99,

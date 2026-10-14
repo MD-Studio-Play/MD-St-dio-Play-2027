@@ -79,7 +79,10 @@ export interface CartConfig {
 }
 
 export interface CheckoutConfig {
-  creditCardGateway: 'mercadopago' | 'stripe' | 'asaas' | 'pagbank';
+  pixGateway?: 'abacatepay';
+  abacatePayApiKey?: string;
+  abacatePayWebhookSecret?: string;
+  creditCardGateway: 'abacatepay' | 'mercadopago' | 'stripe' | 'asaas' | 'pagbank';
   creditCardPublicKey: string;
   creditCardSecretToken: string;
   mercadoPagoAccessToken?: string;
@@ -90,12 +93,6 @@ export interface CheckoutConfig {
   isSandbox: boolean;
   whatsappGatewayUrl?: string;
   whatsappGatewayToken?: string;
-  // Legacy optional properties for backward compatibility
-  pixKey?: string;
-  pixKeyType?: 'email' | 'cpf' | 'cnpj' | 'phone' | 'random';
-  pixBeneficiaryName?: string;
-  pixBeneficiaryCity?: string;
-  pixTxidPrefix?: string;
 }
 
 export interface FirebaseConfig {

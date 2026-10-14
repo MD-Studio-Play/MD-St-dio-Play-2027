@@ -7,6 +7,9 @@ import crypto from 'crypto';
 import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from './src/firebase';
 import { isValidCPF } from './src/utils/cpfValidator';
+import { AbacatePay } from '@abacatepay/sdk';
+import { verifyWebhookSignature, verifyStandardWebhookSignature } from '@abacatepay/types';
+import QRCode from 'qrcode';
 
 dotenv.config();
 
@@ -16,7 +19,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Enable robust cross-browser CORS for all incoming API requests and preflight OPTIONS
@@ -77,6 +85,83 @@ function mapOrderStatus(mpStatus: string): {
     case 'refunded':
       return { orderStatus: 'PAGAMENTO ESTORNADO', simpleStatus: 'cancelled' };
     case 'charged_back':
+      return { orderStatus: 'PAGAMENTO ESTORNADO', simpleStatus: 'cancelled' };
+    default:
+      return { orderStatus: 'AGUARDANDO PAGAMENTO', simpleStatus: 'pending' };
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AbacatePay Official API Helpers (v2)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Retrieve AbacatePay API Key (from env or Firestore site_configs/checkout)
+async function getAbacatePayApiKey(customKey?: string): Promise<string> {
+  if (customKey && customKey.trim().length > 5) return customKey.trim();
+  const envKey =
+    process.env.ABACATEPAY_API_KEY ||
+    process.env.ABACATEPAY_SECRET_KEY ||
+    process.env.ABACATEPAY_TOKEN ||
+    process.env.ABACATE_PAY_API_KEY ||
+    '';
+  if (envKey.trim().length > 5) return envKey.trim();
+  try {
+    const snap = await getDoc(doc(db, 'site_configs', 'checkout'));
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.abacatePayApiKey && data.abacatePayApiKey.trim().length > 5) {
+        return data.abacatePayApiKey.trim();
+      }
+    }
+  } catch {}
+  return '';
+}
+
+// Retrieve AbacatePay Webhook Secret
+async function getAbacatePayWebhookSecret(customSecret?: string): Promise<string> {
+  if (customSecret && customSecret.trim()) return customSecret.trim();
+  const envSecret = process.env.ABACATEPAY_WEBHOOK_SECRET || '';
+  if (envSecret.trim()) return envSecret.trim();
+  try {
+    const snap = await getDoc(doc(db, 'site_configs', 'checkout'));
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.abacatePayWebhookSecret && data.abacatePayWebhookSecret.trim()) {
+        return data.abacatePayWebhookSecret.trim();
+      }
+    }
+  } catch {}
+  return '';
+}
+
+// Map AbacatePay TransparentStatus & Webhook Status to Portuguese Order Status
+function mapAbacatePayStatus(status: string): {
+  orderStatus:
+    | 'AGUARDANDO PAGAMENTO'
+    | 'PAGAMENTO EM ANÁLISE'
+    | 'PAGAMENTO APROVADO'
+    | 'PAGAMENTO REJEITADO'
+    | 'PAGAMENTO CANCELADO'
+    | 'PAGAMENTO ESTORNADO';
+  simpleStatus: 'completed' | 'pending' | 'cancelled';
+} {
+  const norm = String(status || '').toUpperCase();
+  switch (norm) {
+    case 'PAID':
+    case 'APPROVED':
+    case 'COMPLETE':
+      return { orderStatus: 'PAGAMENTO APROVADO', simpleStatus: 'completed' };
+    case 'PENDING':
+      return { orderStatus: 'AGUARDANDO PAGAMENTO', simpleStatus: 'pending' };
+    case 'UNDER_DISPUTE':
+      return { orderStatus: 'PAGAMENTO EM ANÁLISE', simpleStatus: 'pending' };
+    case 'EXPIRED':
+      return { orderStatus: 'PAGAMENTO CANCELADO', simpleStatus: 'cancelled' };
+    case 'CANCELLED':
+    case 'FAILED':
+      return { orderStatus: 'PAGAMENTO REJEITADO', simpleStatus: 'cancelled' };
+    case 'REFUNDED':
+    case 'REDEEMED':
       return { orderStatus: 'PAGAMENTO ESTORNADO', simpleStatus: 'cancelled' };
     default:
       return { orderStatus: 'AGUARDANDO PAGAMENTO', simpleStatus: 'pending' };
@@ -745,11 +830,573 @@ async function handleCreatePayment(req: Request, res: Response) {
   }
 }
 
-app.post('/api/mercadopago/create-payment', handleCreatePayment);
-app.post('/api/mercadopago/create-pix', (req: Request, res: Response) => {
-  req.body.paymentMethodType = 'pix';
-  return handleCreatePayment(req, res);
+app.post('/api/abacatepay/create-pix', handleCreateAbacatePayPix);
+app.post('/api/abacatepay/create-payment', handleCreateAbacatePayPix);
+app.get('/api/abacatepay/payment-status/:id', handleAbacatePayStatus);
+app.post('/api/abacatepay/webhook', handleAbacatePayWebhook);
+
+app.post('/api/abacatepay/test-connection', async (req: Request, res: Response) => {
+  try {
+    const key = (req.body.apiKey || '').trim() || await getAbacatePayApiKey();
+    if (!key) {
+      return res.status(400).json({ success: false, error: 'Chave de API do AbacatePay não configurada.' });
+    }
+    const client = AbacatePay({ secret: key });
+    const result = await client.customers.list({ limit: 1 });
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: 'Conexão com a API oficial do AbacatePay validada com sucesso!',
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Chave de API inválida ou inativa no AbacatePay.',
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Erro ao conectar com AbacatePay' });
+  }
 });
+
+app.get('/api/abacatepay/status', async (_req: Request, res: Response) => {
+  try {
+    const key = await getAbacatePayApiKey();
+    const webhookSecret = await getAbacatePayWebhookSecret();
+    const isDev = key.startsWith('dev_') || key.toLowerCase().includes('test');
+    return res.json({
+      success: true,
+      configured: Boolean(key && key.length > 5),
+      hasApiKey: Boolean(key && key.length > 5),
+      hasWebhookSecret: Boolean(webhookSecret && webhookSecret.length > 3),
+      isDev,
+      keyPrefix: key ? `${key.slice(0, 8)}••••••••` : null,
+      provider: 'abacatepay',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/abacatepay/simulate-payment/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'ID do pagamento não informado.' });
+    }
+    const apiKey = await getAbacatePayApiKey();
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'Chave de API do AbacatePay não configurada.' });
+    }
+    const client = AbacatePay({ secret: apiKey });
+    try {
+      await client.pix.simulate(id);
+    } catch (simErr: any) {
+      console.warn('[ABACATEPAY SIMULATE NOTICE]:', simErr?.message);
+    }
+
+    // Reconcile order in Firestore
+    const snap = await getDocs(query(collection(db, 'orders'), where('payment_id', '==', String(id))));
+    if (!snap.empty) {
+      const orderRef = snap.docs[0].ref;
+      await updateDoc(orderRef, {
+        payment_status: 'approved',
+        order_status: 'PAGAMENTO APROVADO',
+        status: 'completed',
+        paid_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    await setDoc(
+      doc(db, 'payments', String(id)),
+      {
+        status: 'PAID',
+        updated_at: new Date().toISOString(),
+      },
+      { merge: true }
+    ).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'Pagamento PIX do AbacatePay simulado e aprovado com sucesso!',
+      status: 'approved',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/abacatepay/verify-order', async (req: Request, res: Response) => {
+  try {
+    const { orderId, paymentId } = req.body;
+    let orderDoc: any = null;
+    if (orderId) {
+      const snap = await getDoc(doc(db, 'orders', orderId));
+      if (snap.exists()) orderDoc = snap.data();
+    }
+    if (!orderDoc && paymentId) {
+      const qSnap = await getDocs(query(collection(db, 'orders'), where('payment_id', '==', String(paymentId))));
+      if (!qSnap.empty) orderDoc = qSnap.docs[0].data();
+    }
+    if (orderDoc) {
+      const isApproved =
+        orderDoc.status === 'completed' ||
+        orderDoc.payment_status === 'approved' ||
+        orderDoc.order_status === 'PAGAMENTO APROVADO';
+      return res.json({
+        success: true,
+        order: orderDoc,
+        status: orderDoc.status,
+        isApproved,
+      });
+    }
+    return res.status(404).json({ success: false, error: 'Pedido não localizado.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Fallback aliases for smooth backward compatibility
+app.post('/api/mercadopago/create-payment', handleCreateAbacatePayPix);
+app.post('/api/mercadopago/create-pix', handleCreateAbacatePayPix);
+app.get('/api/mercadopago/payment-status/:id', handleAbacatePayStatus);
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ABACATEPAY: Official PIX Creation & Order Generation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleCreateAbacatePayPix(req: Request, res: Response) {
+  try {
+    const {
+      amount,
+      description = 'MD Stúdio Play - Playbacks & Multitracks',
+      payer,
+      items,
+      apiKey: customApiKey,
+      idempotencyKey: clientProvidedIdempotency,
+    } = req.body;
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+
+    const apiKey = await getAbacatePayApiKey(customApiKey || req.body.abacatePayApiKey);
+    if (!apiKey || apiKey.length < 5) {
+      console.warn('[ABACATEPAY CONFIG ALERT]: ABACATEPAY_API_KEY is not configured.');
+      return res.status(400).json({
+        success: false,
+        requiresKey: true,
+        error:
+          'Chave de API do AbacatePay (API Key) não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento ou configure a variável ABACATEPAY_API_KEY.',
+      });
+    }
+
+    // 1. Validate mandatory Payer details
+    const payerName = (payer?.name || '').trim();
+    const cleanCpf = (payer?.cpf || payer?.taxId || '').replace(/\D/g, '');
+    const cleanPhone = (payer?.phone || payer?.cellphone || '').replace(/\D/g, '');
+    const email = (payer?.email || '').trim().toLowerCase();
+
+    if (!payerName || payerName.length < 3) {
+      return res.status(400).json({ success: false, error: 'Nome completo é obrigatório.' });
+    }
+    if (!cleanPhone || cleanPhone.length < 10) {
+      return res.status(400).json({ success: false, error: 'WhatsApp com DDD é obrigatório para entrega digital.' });
+    }
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, error: 'E-mail válido é obrigatório para entrega digital.' });
+    }
+    if (cleanCpf && !isValidCPF(cleanCpf)) {
+      return res.status(400).json({ success: false, error: 'Por favor, informe um CPF válido e existente.' });
+    }
+
+    // 2. Recalculate real purchase total on backend (anti-tampering)
+    const { total: calculatedTotal, postSaleUrls, validatedItems } = calculateRealOrderTotal(items);
+    const finalTotal = calculatedTotal > 0 ? calculatedTotal : (Number(amount) > 0 ? Number(Number(amount).toFixed(2)) : 57.99);
+    if (!finalTotal || finalTotal <= 0) {
+      return res.status(400).json({ success: false, error: 'Valor da compra inválido.' });
+    }
+
+    // AbacatePay amount is integer cents (minimum 100 cents = R$ 1.00)
+    const amountInCents = Math.round(finalTotal * 100);
+
+    // 3. Generate unique order references with proper idempotency
+    const orderTimestamp = Date.now();
+    const orderHex = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const orderId = `ORD-${orderTimestamp}-${orderHex}`;
+    const externalReference = orderId;
+
+    // 4. Initialize official AbacatePay SDK
+    const client = AbacatePay({ secret: apiKey });
+
+    const pixPayload: any = {
+      amount: amountInCents,
+      expiresIn: 3600, // 1 hour
+      description: `MD Stúdio - ${orderId}`.slice(0, 140),
+      externalId: orderId,
+    };
+
+    // If customer data is complete with 11-digit CPF, attach customer object
+    if (cleanCpf && cleanCpf.length === 11) {
+      pixPayload.customer = {
+        name: payerName,
+        cellphone: cleanPhone,
+        email: email,
+        taxId: cleanCpf,
+      };
+    }
+
+    // Call AbacatePay official API
+    const abacateRes = await client.pix.create(pixPayload);
+
+    if (abacateRes.success && abacateRes.data) {
+      const pixData = abacateRes.data;
+      const paymentId = String(pixData.id);
+      const brCode = String(pixData.brCode || '');
+      let qrCodeBase64 = String(pixData.brCodeBase64 || '');
+
+      if (qrCodeBase64 && !qrCodeBase64.startsWith('data:')) {
+        qrCodeBase64 = `data:image/png;base64,${qrCodeBase64}`;
+      } else if (!qrCodeBase64 && brCode) {
+        try {
+          qrCodeBase64 = await QRCode.toDataURL(brCode, {
+            errorCorrectionLevel: 'M',
+            margin: 2,
+            width: 320,
+            color: { dark: '#000000', light: '#ffffff' },
+          });
+        } catch {}
+      }
+
+      const receiptUrl = pixData.receiptUrl || null;
+      const { orderStatus, simpleStatus } = mapAbacatePayStatus(pixData.status);
+
+      // Persist order in Firestore
+      const orderDocData = {
+        id: orderId,
+        orderNumber: orderId,
+        customer_id: cleanPhone,
+        customerName: payerName,
+        customerEmail: email,
+        customerPhone: cleanPhone,
+        customerCpf: cleanCpf || null,
+        external_reference: externalReference,
+        items: validatedItems,
+        total: finalTotal,
+        subtotal: finalTotal,
+        discount: 0,
+        paymentMethod: 'pix',
+        payment_method: 'pix',
+        paymentProvider: 'abacatepay',
+        payment_id: paymentId,
+        payment_status: 'pending',
+        order_status: orderStatus,
+        status: simpleStatus,
+        abacatePayPaymentId: paymentId,
+        pixPayload: brCode,
+        pixQrCodeUrl: qrCodeBase64 || null,
+        ticketUrl: receiptUrl,
+        post_sale_urls: postSaleUrls,
+        date: new Date().toLocaleDateString('pt-BR'),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Persist payment ledger record in Firestore
+      const paymentDocData = {
+        id: paymentId,
+        order_id: orderId,
+        abacate_pay_payment_id: paymentId,
+        external_reference: externalReference,
+        method: 'pix',
+        provider: 'abacatepay',
+        amount: finalTotal,
+        amount_cents: amountInCents,
+        status: pixData.status,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      try {
+        await setDoc(doc(db, 'orders', orderId), orderDocData, { merge: true });
+        await setDoc(doc(db, 'payments', paymentId), paymentDocData, { merge: true });
+      } catch (dbErr) {
+        console.warn('Notice: Firestore save in backend:', dbErr);
+      }
+
+      console.info(`[ABACATEPAY PIX SUCCESS] Order: ${orderId} | ChargeId: ${paymentId} | Amount: R$ ${finalTotal.toFixed(2)}`);
+
+      return res.json({
+        success: true,
+        provider: 'abacatepay',
+        orderId,
+        paymentId,
+        externalReference,
+        status: 'pending',
+        orderStatus,
+        totalAmount: finalTotal,
+        amountCents: amountInCents,
+        qrCode: brCode,
+        qrCodeBase64,
+        ticketUrl: receiptUrl,
+        postSaleUrls,
+      });
+    } else {
+      const errorMsg = abacateRes.error || 'Não foi possível gerar a cobrança PIX no AbacatePay.';
+      console.error('[ABACATEPAY PIX ERROR]:', errorMsg);
+      return res.status(400).json({
+        success: false,
+        provider: 'abacatepay',
+        error: typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg),
+        orderId,
+      });
+    }
+  } catch (err: any) {
+    console.error('[ABACATEPAY EXCEPTION]:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Falha temporária ao comunicar com o AbacatePay. Por favor, tente novamente.',
+    });
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ABACATEPAY: Payment Status Query & Firestore Reconciler
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleAbacatePayStatus(req: Request, res: Response) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'ID do pagamento não informado.' });
+    }
+
+    const apiKey = await getAbacatePayApiKey();
+    if (!apiKey) {
+      let orderSnap = await getDocs(
+        query(collection(db, 'orders'), where('payment_id', '==', String(id)))
+      );
+      if (!orderSnap.empty) {
+        const orderData = orderSnap.docs[0].data();
+        const isApproved = orderData.status === 'completed' || orderData.payment_status === 'approved' || orderData.payment_status === 'PAID';
+        return res.json({
+          success: true,
+          status: isApproved ? 'approved' : 'pending',
+          isApproved,
+          order: orderData,
+        });
+      }
+      return res.json({ success: true, status: 'pending' });
+    }
+
+    const client = AbacatePay({ secret: apiKey });
+    const statusRes = await client.pix.status(id);
+
+    if (statusRes.success && statusRes.data) {
+      const pixStatus = statusRes.data.status;
+      const isApproved = pixStatus === 'PAID' || pixStatus === 'APPROVED';
+      const { orderStatus, simpleStatus } = mapAbacatePayStatus(pixStatus);
+
+      let matchedOrderData: any = null;
+      try {
+        let orderSnap = await getDocs(
+          query(collection(db, 'orders'), where('payment_id', '==', String(id)))
+        );
+
+        if (!orderSnap.empty) {
+          const orderDocRef = orderSnap.docs[0].ref;
+          matchedOrderData = orderSnap.docs[0].data();
+
+          if (isApproved && matchedOrderData.status !== 'completed') {
+            await updateDoc(orderDocRef, {
+              payment_status: 'approved',
+              order_status: 'PAGAMENTO APROVADO',
+              status: 'completed',
+              updated_at: new Date().toISOString(),
+            });
+
+            matchedOrderData = {
+              ...matchedOrderData,
+              payment_status: 'approved',
+              order_status: 'PAGAMENTO APROVADO',
+              status: 'completed',
+            };
+          }
+        }
+
+        if (isApproved) {
+          await setDoc(
+            doc(db, 'payments', String(id)),
+            {
+              status: 'PAID',
+              updated_at: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+      } catch (dbErr) {
+        console.warn('Notice: Firestore status sync error:', dbErr);
+      }
+
+      return res.json({
+        success: true,
+        provider: 'abacatepay',
+        id,
+        status: isApproved ? 'approved' : pixStatus.toLowerCase(),
+        rawStatus: pixStatus,
+        orderStatus,
+        isApproved,
+        order: matchedOrderData,
+      });
+    } else {
+      let orderSnap = await getDocs(
+        query(collection(db, 'orders'), where('payment_id', '==', String(id)))
+      );
+      if (!orderSnap.empty) {
+        const orderData = orderSnap.docs[0].data();
+        const isApproved = orderData.status === 'completed' || orderData.payment_status === 'approved';
+        return res.json({
+          success: true,
+          status: isApproved ? 'approved' : 'pending',
+          isApproved,
+          order: orderData,
+        });
+      }
+
+      return res.json({ success: false, status: 'pending', error: statusRes.error });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ABACATEPAY: Official Webhook Event Receiver
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleAbacatePayWebhook(req: Request, res: Response) {
+  try {
+    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+    const headers = req.headers as Record<string, string>;
+    const body = req.body || {};
+    const querySecret = String(req.query?.webhookSecret || req.query?.secret || '');
+
+    const configuredSecret = await getAbacatePayWebhookSecret();
+
+    // Verify webhook signature if secret configured
+    if (configuredSecret) {
+      const signatureLegacy = headers['x-webhook-signature'];
+      const stdId = headers['webhook-id'];
+      const stdTimestamp = headers['webhook-timestamp'];
+      const stdSig = headers['webhook-signature'];
+
+      let isValid = false;
+      if (querySecret && querySecret === configuredSecret) {
+        isValid = true;
+      } else if (stdId && stdTimestamp && stdSig) {
+        isValid = verifyStandardWebhookSignature(
+          rawBody,
+          { id: stdId, timestamp: stdTimestamp, signature: stdSig },
+          configuredSecret
+        );
+      } else if (signatureLegacy) {
+        isValid = verifyWebhookSignature(rawBody, signatureLegacy);
+      }
+
+      if (!isValid && !querySecret.includes(configuredSecret)) {
+        console.warn('[ABACATEPAY WEBHOOK] Assinatura do webhook inválida. Ignorando evento não autenticado.');
+        return res.status(401).json({ error: 'Assinatura inválida' });
+      }
+    }
+
+    const event = body.event || body.type;
+    const eventId = body.id || `evt_${Date.now()}`;
+    const data = body.data || {};
+
+    console.info(`[ABACATEPAY WEBHOOK RECEIVED] Event: ${event} | ID: ${eventId}`);
+
+    // Prevent duplicate processing with idempotency ledger in Firestore
+    const webhookLedgerRef = doc(db, 'webhook_events', eventId);
+    const existingSnap = await getDoc(webhookLedgerRef).catch(() => null);
+    if (existingSnap && existingSnap.exists()) {
+      console.info(`[ABACATEPAY WEBHOOK] Evento ${eventId} já processado anteriormente. Retornando 200 OK.`);
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    await setDoc(
+      webhookLedgerRef,
+      {
+        id: eventId,
+        event,
+        provider: 'abacatepay',
+        data,
+        processed_at: new Date().toISOString(),
+      },
+      { merge: true }
+    ).catch(() => {});
+
+    // Identify order / charge ID
+    const chargeId = String(data.id || data.chargeId || '');
+    const externalId = String(data.externalId || data.orderId || data.metadata?.orderId || '');
+
+    const isPaymentApproved =
+      event === 'billing.paid' ||
+      event === 'checkout.completed' ||
+      event === 'pix.paid' ||
+      data.status === 'PAID' ||
+      data.status === 'APPROVED';
+
+    if (isPaymentApproved) {
+      let orderDocRef: any = null;
+      let orderData: any = null;
+
+      if (chargeId) {
+        const snap = await getDocs(query(collection(db, 'orders'), where('payment_id', '==', chargeId)));
+        if (!snap.empty) {
+          orderDocRef = snap.docs[0].ref;
+          orderData = snap.docs[0].data();
+        }
+      }
+
+      if (!orderDocRef && externalId) {
+        const snap = await getDocs(query(collection(db, 'orders'), where('id', '==', externalId)));
+        if (!snap.empty) {
+          orderDocRef = snap.docs[0].ref;
+          orderData = snap.docs[0].data();
+        }
+      }
+
+      if (orderDocRef) {
+        await updateDoc(orderDocRef, {
+          payment_status: 'approved',
+          order_status: 'PAGAMENTO APROVADO',
+          status: 'completed',
+          paid_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        console.info(`[ABACATEPAY WEBHOOK] Pedido ${orderData?.id || externalId} aprovado e liberado com sucesso!`);
+      }
+
+      if (chargeId) {
+        await setDoc(
+          doc(db, 'payments', chargeId),
+          {
+            status: 'PAID',
+            updated_at: new Date().toISOString(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+    }
+
+    return res.status(200).json({ received: true, success: true });
+  } catch (err: any) {
+    console.error('[ABACATEPAY WEBHOOK ERROR]:', err);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 3.1 API: Official Mercado Pago Checkout Pro (Orders & Preferences API)
@@ -1229,6 +1876,9 @@ app.get('/api/mercadopago/payment-status/:id', async (req: Request, res: Respons
 
   try {
     const { id } = req.params;
+    if (id?.startsWith('pix_char_') || id?.startsWith('bill_') || id?.startsWith('ORD-')) {
+      return handleAbacatePayStatus(req, res);
+    }
     const accessToken = getAccessToken();
 
     if (!id) {

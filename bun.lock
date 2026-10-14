@@ -5,6 +5,7 @@
     "": {
       "name": "react-example",
       "dependencies": {
+        "@abacatepay/sdk": "^3.0.0",
         "@google/genai": "^2.4.0",
         "@tailwindcss/vite": "^4.3.3",
         "@types/canvas-confetti": "^1.9.0",
@@ -35,6 +36,12 @@
     },
   },
   "packages": {
+    "@abacatepay/rest": ["@abacatepay/rest@1.1.0", "", {}, "sha512-RS6iKZ4ZVMmNbbihix460r2ljty4U9yx7PZMb/fuhFKnb2/zh7+cSHHiKjczvwwowmbzDQyqLCV8ej6t7PEc4g=="],
+
+    "@abacatepay/sdk": ["@abacatepay/sdk@3.0.0", "", { "dependencies": { "@abacatepay/rest": "^1.1.0", "@abacatepay/types": "^4.0.0" } }, "sha512-XGtCgu+DOkZGYGa6jQQPdnnzR2WhUZN+zhjXm9m+Wli3JvNXDiPLPQZ2dXTEKU8ytP1qmEJsNdRc10YQ1y6NDA=="],
+
+    "@abacatepay/types": ["@abacatepay/types@4.0.0", "", {}, "sha512-nivPSW/j5aj6A26nStpRqtQaw4Up2ATm7ycyfllVcHvmZbNVI1PcXu5mHuPrTfjvS1Gja1jErlCKjXg2/ZF38w=="],
+
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.25.12", "", { "os": "aix", "cpu": "ppc64" }, "sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA=="],
 
     "@esbuild/android-arm": ["@esbuild/android-arm@0.25.12", "", { "os": "android", "cpu": "arm" }, "sha512-VJ+sKvNA/GE7Ccacc9Cha7bpS8nyzVv0jdVgwNDaR4gDMC/2TTRc33Ip8qrNYUcpkOHUT5OZ0bUcNNVZQ9RLlg=="],

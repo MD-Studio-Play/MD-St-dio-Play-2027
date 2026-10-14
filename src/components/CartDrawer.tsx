@@ -163,7 +163,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     return true;
   };
 
-  // Generate Real Mercado Pago PIX QR Code via Server API
+  // Generate Real AbacatePay PIX QR Code via Server API
   const handleGenerateMercadoPagoPix = async () => {
     if (!validateCustomerFields()) return;
 
@@ -176,7 +176,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-      const response = await fetch('/api/mercadopago/create-pix', {
+      const response = await fetch('/api/abacatepay/create-pix', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -223,20 +223,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       } else {
         setFormError(
           data?.error ||
-            'Não foi possível gerar o PIX no Mercado Pago. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.'
+            'Não foi possível gerar a cobrança PIX no AbacatePay. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.'
         );
       }
     } catch (err: any) {
-      console.warn('Falha na rota Mercado Pago:', err);
+      console.warn('Falha na rota AbacatePay:', err);
       setFormError(
-        'Falha momentânea de comunicação com o gateway de pagamentos. Por favor tente novamente em instantes.'
+        'Falha momentânea de comunicação com o AbacatePay. Por favor tente novamente em instantes.'
       );
     } finally {
       setMpLoading(false);
     }
   };
 
-  // Poll payment status if paymentId exists and is real Mercado Pago ID
+  // Poll payment status if paymentId exists and is real AbacatePay ID
   useEffect(() => {
     if (!mpPaymentId || mpPaymentId.startsWith('demo_') || isCompleted) {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -248,9 +248,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     const checkStatus = async () => {
       if (!isPollingActive) return;
       try {
-        const res = await fetch(`/api/mercadopago/payment-status/${mpPaymentId}`);
+        const res = await fetch(`/api/abacatepay/payment-status/${mpPaymentId}`);
         const json = await res.json();
-        if (json.success && json.status === 'approved' && isPollingActive) {
+        if (json.success && (json.status === 'approved' || json.isApproved || json.rawStatus === 'PAID') && isPollingActive) {
           isPollingActive = false;
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
           await handleFinalizeOrderAndRedirect('pix');
