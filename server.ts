@@ -450,6 +450,12 @@ async function handleCreatePayment(req: Request, res: Response) {
     if (!email || !email.includes('@')) {
       return res.status(400).json({ success: false, error: 'E-mail válido é obrigatório.' });
     }
+    if (email === 'moriartdigital@gmail.com') {
+      return res.status(400).json({
+        success: false,
+        error: 'O Mercado Pago não permite compras utilizando o mesmo e-mail da sua conta vendedora (moriartdigital@gmail.com). Para testar a geração do PIX, utilize qualquer outro e-mail diferente.',
+      });
+    }
     if (cleanCpf && !isValidCPF(cleanCpf)) {
       return res.status(400).json({ success: false, error: 'Por favor, informe um CPF válido e existente.' });
     }

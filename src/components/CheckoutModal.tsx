@@ -1141,21 +1141,28 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </h3>
                 {errorType === 'communication' && (
                   <p className="text-xs sm:text-sm font-semibold text-amber-400">
-                    Estamos tentando estabelecer comunicação com o Mercado Pago.
+                    Orientações para prosseguir com seu pedido
                   </p>
                 )}
                 <p className="text-xs text-neutral-300 mt-1 max-w-sm mx-auto leading-relaxed">
                   {formError || (errorType === 'communication'
                     ? 'Clique no botão abaixo para gerar uma nova cobrança segura.'
-                    : 'A operadora não autorizou a transação ou os dados informados possuem divergência.')
+                    : 'A instituição financeira não autorizou a transação ou os dados informados possuem divergência.')
                   }
                 </p>
               </div>
 
-              <div className="p-4 rounded-2xl bg-[#14161c] border border-white/[0.08] text-xs text-neutral-300 leading-relaxed">
-                {errorType === 'communication'
-                  ? 'Seus itens e o valor total da compra foram preservados. Clique em "GERAR NOVO PIX" para efetuar uma nova tentativa segura.'
-                  : 'Você pode tentar pagar via PIX Oficial ou conferir os dados e tentar novamente.'}
+              {/* Informative advice box */}
+              <div className="p-4 rounded-2xl bg-[#14161c] border border-white/[0.08] text-xs text-neutral-300 space-y-2 text-left">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-emerald-400" />
+                  <span>O que você deve fazer:</span>
+                </div>
+                <ul className="space-y-1.5 text-[11px] text-neutral-300 list-disc list-inside">
+                  <li><strong>Se for teste da loja:</strong> certifique-se de preencher um e-mail diferente de <code className="text-amber-400 bg-black/40 px-1 py-0.5 rounded">moriartdigital@gmail.com</code> (o Mercado Pago não permite que a conta vendedora pague a si mesma).</li>
+                  <li><strong>Verifique seu WhatsApp e E-mail:</strong> confira se o DDD e os 9 dígitos do celular estão corretos para receber os links.</li>
+                  <li><strong>Tentar novamente:</strong> clique em "GERAR NOVO PIX" para obter um novo QR Code exclusivo e instantâneo.</li>
+                </ul>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5">
@@ -1183,7 +1190,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   onClick={handleTryAgain}
                   className="w-full py-3.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-colors cursor-pointer"
                 >
-                  Voltar / Revisar Dados
+                  Revisar Dados
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="w-full py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Voltar para a Loja</span>
                 </button>
               </div>
             </div>

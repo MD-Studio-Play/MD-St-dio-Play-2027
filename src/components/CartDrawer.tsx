@@ -223,13 +223,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       } else {
         setFormError(
           data?.error ||
-            'Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.'
+            'Não foi possível gerar o PIX no Mercado Pago. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.'
         );
       }
     } catch (err: any) {
       console.warn('Falha na rota Mercado Pago:', err);
       setFormError(
-        'Falha de comunicação temporária com o Mercado Pago. Por favor tente novamente em instantes.'
+        'Falha momentânea de comunicação com o gateway de pagamentos. Por favor tente novamente em instantes.'
       );
     } finally {
       setMpLoading(false);

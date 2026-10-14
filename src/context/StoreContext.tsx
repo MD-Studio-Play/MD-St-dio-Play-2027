@@ -416,7 +416,19 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
-    return localStorage.getItem('jsp_is_admin') === 'true';
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('admin') === 'true' || params.get('painel') === 'true') {
+          return true;
+        }
+      }
+    } catch {}
+    // Always default to false on load so the public storefront is immediately visible to visitors
+    try {
+      localStorage.removeItem('jsp_is_admin');
+    } catch {}
+    return false;
   });
 
   // Admin Portal Auth
@@ -997,7 +1009,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Auto-sync with localStorage & auto-push to Firestore for multi-browser real-time propagation
   useEffect(() => {
-    localStorage.setItem('jsp_is_admin', isAdminMode ? 'true' : 'false');
+    try {
+      if (isAdminMode) {
+        localStorage.setItem('jsp_is_admin', 'true');
+      } else {
+        localStorage.removeItem('jsp_is_admin');
+      }
+    } catch {}
   }, [isAdminMode]);
 
   useEffect(() => {
@@ -1719,11 +1737,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Reset and purge all legacy manual PIX generator settings
   const resetCheckoutConfig = () => {
-    localStorage.removeItem('jsp_checkout');
+    try {
+      localStorage.removeItem('jsp_checkout');
+      localStorage.removeItem('jsp_pix_key');
+      localStorage.removeItem('jsp_pix_beneficiary');
+    } catch {}
     setCheckoutConfig(DEFAULT_CHECKOUT);
     try {
-      const docRef = doc(db, 'site_configs', 'checkout');
-      setDoc(docRef, DEFAULT_CHECKOUT);
+      setDoc(doc(db, 'site_configs', 'checkout'), DEFAULT_CHECKOUT, { merge: true });
+      setDoc(doc(db, 'site_settings', 'checkout'), { key: 'checkout', config: DEFAULT_CHECKOUT, updatedAt: new Date().toISOString() }, { merge: true });
     } catch (e) {
       console.warn('Notice resetting checkout in Firestore:', e);
     }
