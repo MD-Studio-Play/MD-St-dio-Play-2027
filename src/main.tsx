@@ -29,10 +29,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   handleReset = () => {
     try {
-      localStorage.removeItem('jsp_orders');
-      localStorage.removeItem('jsp_packs');
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith('jsp_')) {
+          localStorage.removeItem(key);
+        }
+      });
     } catch {}
-    window.location.reload();
+    window.location.href = '/';
   };
 
   handleResetStore = () => {
@@ -40,7 +43,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       localStorage.setItem('jsp_is_admin', 'false');
     } catch {}
     this.setState({ hasError: false, error: undefined });
-    window.location.reload();
+    window.location.href = '/';
   };
 
   render() {

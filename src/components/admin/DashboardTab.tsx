@@ -56,7 +56,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
             MD Stúdio Play Store Manager
           </h2>
           <p className="text-xs text-neutral-400 mt-1 max-w-xl">
-            Gerencie o catálogo de áudios, configure o gerador de PIX em tempo real, tokens de gateway de pagamento, temas visuais e integrações com o Firebase.
+            Gerencie o catálogo de áudios, gateway oficial de pagamentos PIX Mercado Pago em tempo real, pedidos, temas visuais e integrações com o Firebase.
           </p>
         </div>
 
@@ -165,46 +165,48 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
 
       {/* System Status & Gateways Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* PIX Status Card */}
+        {/* Orders & Reconciliation Card */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-[#55c21b]/10 text-[#55c21b]">
-                <QrCode className="w-5 h-5" />
+              <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <ShoppingBag className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">Sistema PIX Oficial</h4>
-                <p className="text-[11px] text-neutral-400">Padrão BCB EMVCo</p>
+                <h4 className="text-sm font-bold text-white">Pedidos & Vendas</h4>
+                <p className="text-[11px] text-neutral-400">Conciliação Automática</p>
               </div>
             </div>
             <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
-              ATIVO
+              SINCRONIZADO
             </span>
           </div>
 
           <div className="bg-black/40 rounded-xl p-3 border border-white/5 space-y-1.5 text-xs">
             <div className="flex justify-between text-neutral-400">
-              <span>Chave PIX:</span>
-              <span className="font-mono text-white text-[11px] truncate max-w-[180px]">
-                {checkoutConfig.pixKey}
+              <span>Total de Pedidos:</span>
+              <span className="font-mono text-white text-[11px] font-bold">
+                {safeOrders.length} pedidos
               </span>
             </div>
             <div className="flex justify-between text-neutral-400">
-              <span>Beneficiário:</span>
-              <span className="text-white text-[11px]">{checkoutConfig.pixBeneficiaryName}</span>
+              <span>Pagos / Aprovados:</span>
+              <span className="text-emerald-400 font-bold">
+                {safeOrders.filter((o) => o.status === 'completed' || o.payment_status === 'approved').length}
+              </span>
             </div>
             <div className="flex justify-between text-neutral-400">
-              <span>Cidade:</span>
-              <span className="text-white text-[11px]">{checkoutConfig.pixBeneficiaryCity}</span>
+              <span>Liberação:</span>
+              <span className="text-white text-[11px]">Instantânea via PIX</span>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={() => onNavigateToTab('checkout')}
+            onClick={() => onNavigateToTab('orders')}
             className="w-full py-2 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
           >
-            <span>Gerenciar Chave & Gerador PIX</span>
+            <span>Ver Pedidos & Histórico</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>

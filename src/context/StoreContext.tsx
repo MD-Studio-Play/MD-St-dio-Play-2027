@@ -114,6 +114,7 @@ interface StoreContextType {
   deleteOrder: (orderId: string) => void;
 
   // Actions
+  resetCheckoutConfig: () => void;
   resetToDefaults: () => void;
   exportConfigBackup: () => void;
   importConfigBackup: (jsonString: string) => boolean;
@@ -196,11 +197,6 @@ const DEFAULT_CART: CartConfig = {
 };
 
 const DEFAULT_CHECKOUT: CheckoutConfig = {
-  pixKey: 'comercial@mdstudioplay.com.br',
-  pixKeyType: 'email',
-  pixBeneficiaryName: 'MD STUDIO PLAY',
-  pixBeneficiaryCity: 'VITÓRIA ES',
-  pixTxidPrefix: 'MDST',
   creditCardGateway: 'mercadopago',
   creditCardPublicKey: 'APP_USR-e20b9b98-f894-4c4a-a362-d966053a663f',
   creditCardSecretToken: '',
@@ -209,7 +205,7 @@ const DEFAULT_CHECKOUT: CheckoutConfig = {
   creditCardMaxInstallments: 6,
   creditCardInstallmentsFree: 3,
   creditCardInterestRate: 2.99,
-  isSandbox: true,
+  isSandbox: false,
   whatsappGatewayUrl: '',
   whatsappGatewayToken: '',
 };
@@ -599,10 +595,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.pixBeneficiaryName && parsed.pixBeneficiaryName.includes('JS PLAYBACKS')) {
-          return DEFAULT_CHECKOUT;
-        }
-        return parsed;
+        // Exclude and delete all legacy manual static PIX generator configs
+        delete parsed.pixKey;
+        delete parsed.pixKeyType;
+        delete parsed.pixBeneficiaryName;
+        delete parsed.pixBeneficiaryCity;
+        delete parsed.pixTxidPrefix;
+        return {
+          ...DEFAULT_CHECKOUT,
+          ...parsed,
+        };
       } catch {
         return DEFAULT_CHECKOUT;
       }
@@ -836,9 +838,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             } else if (id === 'cart' && Array.isArray(config.coupons)) {
               setCartConfig(config);
               localStorage.setItem('jsp_cart', JSON.stringify(config));
-            } else if (id === 'checkout' && config.pixKey) {
-              setCheckoutConfig(config);
-              localStorage.setItem('jsp_checkout', JSON.stringify(config));
+            } else if (id === 'checkout') {
+              const cleanConfig = { ...DEFAULT_CHECKOUT, ...config };
+              delete cleanConfig.pixKey;
+              delete cleanConfig.pixKeyType;
+              delete cleanConfig.pixBeneficiaryName;
+              delete cleanConfig.pixBeneficiaryCity;
+              delete cleanConfig.pixTxidPrefix;
+              setCheckoutConfig(cleanConfig);
+              localStorage.setItem('jsp_checkout', JSON.stringify(cleanConfig));
             }
           });
         }
@@ -1709,6 +1717,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return loginCustomerDirectWithPhone(phone);
   };
 
+  // Reset and purge all legacy manual PIX generator settings
+  const resetCheckoutConfig = () => {
+    localStorage.removeItem('jsp_checkout');
+    setCheckoutConfig(DEFAULT_CHECKOUT);
+    try {
+      const docRef = doc(db, 'site_configs', 'checkout');
+      setDoc(docRef, DEFAULT_CHECKOUT);
+    } catch (e) {
+      console.warn('Notice resetting checkout in Firestore:', e);
+    }
+  };
+
   // Factory Reset with Undo backup
   const resetToDefaults = () => {
     setPacks(ALL_PACKS);
@@ -1836,6 +1856,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addOrder,
         updateOrderStatus,
         deleteOrder,
+        resetCheckoutConfig,
         resetToDefaults,
         exportConfigBackup,
         importConfigBackup,

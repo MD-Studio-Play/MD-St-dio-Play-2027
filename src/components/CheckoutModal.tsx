@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
-import { PlaybackPack, CartItem } from '../types';
-import { generatePixPayload, generatePixQrCodeDataUrl } from '../utils/pix';
+import { CartItem, PlaybackPack } from '../types';
+import { generatePixQrCodeDataUrl } from '../utils/pix';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import {
@@ -268,15 +268,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const prevItemsLengthRef = useRef<number>(items.length);
 
   useEffect(() => {
-    if (prevTotalRef.current !== totalAmount || prevItemsLengthRef.current !== items.length) {
-      prevTotalRef.current = totalAmount;
-      prevItemsLengthRef.current = items.length;
-      if (viewState === 'pix_display') {
+    if (viewState === 'pix_display' && items.length > 0 && totalAmount > 0) {
+      if (prevTotalRef.current !== totalAmount || prevItemsLengthRef.current !== items.length) {
+        prevTotalRef.current = totalAmount;
+        prevItemsLengthRef.current = items.length;
         setPixQrCode(null);
         setPixQrCodeBase64(null);
         setPixPaymentId(null);
         setViewState('checkout');
       }
+    } else {
+      prevTotalRef.current = totalAmount;
+      prevItemsLengthRef.current = items.length;
     }
   }, [totalAmount, items.length, viewState]);
 
@@ -497,16 +500,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
-        const errorMsg = data?.error || 'Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.';
+        const errorMsg = data?.error || 'Não foi possível gerar o PIX no Mercado Pago neste momento. Por favor, confira seus dados e tente novamente.';
         setErrorType('communication');
         setFormError(errorMsg);
-        setViewState('error');
       }
     } catch (err: any) {
       console.warn('Erro ao conectar com API do Mercado Pago:', err);
       setErrorType('communication');
-      setFormError('Não foi possível gerar o PIX neste momento. Estamos tentando estabelecer comunicação com o Mercado Pago.');
-      setViewState('error');
+      setFormError('Falha temporária de comunicação com o Mercado Pago. Por favor, tente novamente em instantes.');
     } finally {
       setIsProcessing(false);
       setButtonState('idle');
@@ -518,10 +519,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     cleanUrlParams();
     onResetInitialView?.();
     setFormError(null);
+    setViewState('checkout');
     if (validateCustomer()) {
-      handleGeneratePix(true);
-    } else {
-      setViewState('checkout');
+      setTimeout(() => handleGeneratePix(true), 50);
     }
   };
 

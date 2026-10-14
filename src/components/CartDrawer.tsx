@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CartItem, PlaybackPack } from '../types';
 import { PackThumbnail } from './PackThumbnail';
 import { useStore } from '../context/StoreContext';
-import { generatePixPayload, generatePixQrCodeDataUrl } from '../utils/pix';
+import { generatePixQrCodeDataUrl } from '../utils/pix';
 import {
   X,
   Trash2,
