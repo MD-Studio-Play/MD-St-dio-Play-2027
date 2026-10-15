@@ -95,9 +95,33 @@ function mapOrderStatus(mpStatus: string): {
 // AbacatePay Official API Helpers (v2)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Retrieve AbacatePay API Key (from env or Firestore site_configs/checkout)
+// Retrieve AbacatePay API Key (from Firestore site_settings/checkout or site_configs/checkout or env)
 async function getAbacatePayApiKey(customKey?: string): Promise<string> {
   if (customKey && customKey.trim().length > 5) return customKey.trim();
+  
+  // 1. Prioritize user-configured key from Firestore Admin Panel
+  try {
+    const snap1 = await getDoc(doc(db, 'site_settings', 'checkout'));
+    if (snap1.exists()) {
+      const data = snap1.data();
+      const cfg = data?.config || data;
+      if (cfg?.abacatePayApiKey && cfg.abacatePayApiKey.trim().length > 5) {
+        return cfg.abacatePayApiKey.trim();
+      }
+    }
+  } catch {}
+
+  try {
+    const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
+    if (snap2.exists()) {
+      const data = snap2.data();
+      if (data?.abacatePayApiKey && data.abacatePayApiKey.trim().length > 5) {
+        return data.abacatePayApiKey.trim();
+      }
+    }
+  } catch {}
+
+  // 2. Fallback to server environment variables
   const envKey =
     process.env.ABACATEPAY_API_KEY ||
     process.env.ABACATEPAY_SECRET_KEY ||
@@ -105,32 +129,40 @@ async function getAbacatePayApiKey(customKey?: string): Promise<string> {
     process.env.ABACATE_PAY_API_KEY ||
     '';
   if (envKey.trim().length > 5) return envKey.trim();
-  try {
-    const snap = await getDoc(doc(db, 'site_configs', 'checkout'));
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data?.abacatePayApiKey && data.abacatePayApiKey.trim().length > 5) {
-        return data.abacatePayApiKey.trim();
-      }
-    }
-  } catch {}
+
   return '';
 }
 
 // Retrieve AbacatePay Webhook Secret
 async function getAbacatePayWebhookSecret(customSecret?: string): Promise<string> {
   if (customSecret && customSecret.trim()) return customSecret.trim();
-  const envSecret = process.env.ABACATEPAY_WEBHOOK_SECRET || '';
-  if (envSecret.trim()) return envSecret.trim();
+
+  // 1. Prioritize Firestore Admin Panel
   try {
-    const snap = await getDoc(doc(db, 'site_configs', 'checkout'));
-    if (snap.exists()) {
-      const data = snap.data();
+    const snap1 = await getDoc(doc(db, 'site_settings', 'checkout'));
+    if (snap1.exists()) {
+      const data = snap1.data();
+      const cfg = data?.config || data;
+      if (cfg?.abacatePayWebhookSecret && cfg.abacatePayWebhookSecret.trim()) {
+        return cfg.abacatePayWebhookSecret.trim();
+      }
+    }
+  } catch {}
+
+  try {
+    const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
+    if (snap2.exists()) {
+      const data = snap2.data();
       if (data?.abacatePayWebhookSecret && data.abacatePayWebhookSecret.trim()) {
         return data.abacatePayWebhookSecret.trim();
       }
     }
   } catch {}
+
+  // 2. Fallback to server environment variables
+  const envSecret = process.env.ABACATEPAY_WEBHOOK_SECRET || '';
+  if (envSecret.trim()) return envSecret.trim();
+
   return '';
 }
 
@@ -837,25 +869,123 @@ app.post('/api/abacatepay/webhook', handleAbacatePayWebhook);
 
 app.post('/api/abacatepay/test-connection', async (req: Request, res: Response) => {
   try {
-    const key = (req.body.apiKey || '').trim() || await getAbacatePayApiKey();
+    const rawKey = (req.body.apiKey || req.body.abacatePayApiKey || '').trim();
+    const key = rawKey || (await getAbacatePayApiKey());
     if (!key) {
-      return res.status(400).json({ success: false, error: 'Chave de API do AbacatePay não configurada.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Chave de API do AbacatePay não configurada. Por favor, insira a chave no campo abaixo.',
+      });
     }
     const client = AbacatePay({ secret: key });
     const result = await client.customers.list({ limit: 1 });
-    if (result.success) {
-      return res.json({
-        success: true,
-        message: 'Conexão com a API oficial do AbacatePay validada com sucesso!',
-      });
-    } else {
+    if (!result.success) {
+      const errStr = String(result.error || '');
+      let friendlyError = errStr;
+      if (errStr.includes('Invalid or inactive API key')) {
+        friendlyError = 'Chave de API inválida ou inativa no AbacatePay. Verifique se copiou a chave completa gerada no painel do AbacatePay (Configurações > Chaves de API).';
+      }
       return res.status(400).json({
         success: false,
-        error: result.error || 'Chave de API inválida ou inativa no AbacatePay.',
+        error: friendlyError,
+        rawError: errStr,
       });
     }
+
+    // Test if key has permission for TRANSPARENT PIX (TRANSPARENT:CREATE)
+    let hasTransparentPermission = true;
+    let permWarning: string | null = null;
+    try {
+      const testPix = await client.pix.create({
+        amount: 100,
+        expiresIn: 3600,
+        description: 'Verificação de Permissões',
+        externalId: `perm_check_${Date.now()}`,
+      });
+      if (!testPix.success && String(testPix.error).toLowerCase().includes('permission')) {
+        hasTransparentPermission = false;
+        permWarning =
+          'A chave de API está ativa, mas NÃO possui a permissão "TRANSPARENT:CREATE" necessária para gerar cobranças PIX dinâmicas na loja. No painel do AbacatePay, gere uma nova chave marcando a permissão "TRANSPARENT:CREATE" (ou Acesso Total) e salve-a aqui.';
+      }
+    } catch (e: any) {
+      if (String(e?.message).toLowerCase().includes('permission')) {
+        hasTransparentPermission = false;
+        permWarning =
+          'A chave de API está ativa, mas NÃO possui a permissão "TRANSPARENT:CREATE" necessária para gerar cobranças PIX dinâmicas na loja. No painel do AbacatePay, gere uma nova chave marcando a permissão "TRANSPARENT:CREATE" (ou Acesso Total) e salve-a aqui.';
+      }
+    }
+
+    if (!hasTransparentPermission) {
+      return res.status(403).json({
+        success: false,
+        permissionError: true,
+        error: permWarning,
+        rawError: 'Insufficient permissions',
+      });
+    }
+
+    // If user requested to save alongside test, persist to Firestore
+    if (req.body.save && rawKey) {
+      try {
+        await setDoc(doc(db, 'site_settings', 'checkout'), { config: { abacatePayApiKey: rawKey } }, { merge: true });
+        await setDoc(doc(db, 'site_configs', 'checkout'), { abacatePayApiKey: rawKey }, { merge: true });
+      } catch {}
+    }
+
+    return res.json({
+      success: true,
+      message: 'Conexão e permissões PIX do AbacatePay validadas com 100% de sucesso!',
+      isDev: key.startsWith('dev_') || key.toLowerCase().includes('test'),
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || 'Erro ao conectar com AbacatePay' });
+  }
+});
+
+app.post('/api/abacatepay/save-key', async (req: Request, res: Response) => {
+  try {
+    const { apiKey, webhookSecret } = req.body;
+    const cleanKey = (apiKey || '').trim();
+    const cleanSecret = (webhookSecret || '').trim();
+
+    if (!cleanKey || cleanKey.length < 5) {
+      return res.status(400).json({ success: false, error: 'Chave de API inválida.' });
+    }
+
+    // Verify key with AbacatePay before saving
+    const client = AbacatePay({ secret: cleanKey });
+    const verifyRes = await client.customers.list({ limit: 1 });
+    if (!verifyRes.success) {
+      const errStr = String(verifyRes.error || '');
+      let friendly = errStr;
+      if (errStr.includes('Invalid or inactive API key')) {
+        friendly = 'A chave inserida é inválida ou está inativa no AbacatePay. Por favor, confira a chave no painel do AbacatePay (Configurações > Chaves de API).';
+      }
+      return res.status(400).json({
+        success: false,
+        error: friendly,
+      });
+    }
+
+    // Save to Firestore
+    const dataToSave: any = {
+      abacatePayApiKey: cleanKey,
+      pixGateway: 'abacatepay',
+    };
+    if (cleanSecret) {
+      dataToSave.abacatePayWebhookSecret = cleanSecret;
+    }
+
+    await setDoc(doc(db, 'site_settings', 'checkout'), { config: dataToSave }, { merge: true });
+    await setDoc(doc(db, 'site_configs', 'checkout'), dataToSave, { merge: true });
+
+    return res.json({
+      success: true,
+      message: 'Chave de API do AbacatePay testada e salva com sucesso!',
+      isDev: cleanKey.startsWith('dev_') || cleanKey.toLowerCase().includes('test'),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1142,12 +1272,21 @@ async function handleCreateAbacatePayPix(req: Request, res: Response) {
         postSaleUrls,
       });
     } else {
-      const errorMsg = abacateRes.error || 'Não foi possível gerar a cobrança PIX no AbacatePay.';
-      console.error('[ABACATEPAY PIX ERROR]:', errorMsg);
+      const rawError = abacateRes.error || 'Não foi possível gerar a cobrança PIX no AbacatePay.';
+      let friendlyError = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
+      if (friendlyError.includes('Invalid or inactive API key')) {
+        friendlyError =
+          'Chave de API do AbacatePay inválida ou inativa. Acesse o Painel Admin > Checkout & Pagamento para inserir sua chave ativa copiada no painel do AbacatePay (Configurações > Chaves de API).';
+      } else if (friendlyError.toLowerCase().includes('insufficient permissions')) {
+        friendlyError =
+          'Permissões insuficientes na Chave de API do AbacatePay (Insufficient permissions). A chave precisa da permissão "TRANSPARENT:CREATE" (Cobranças Transparentes / PIX). Acesse o painel do AbacatePay (Configurações > Chaves de API), gere uma nova chave marcando a permissão "TRANSPARENT:CREATE" (ou Acesso Total) e salve no Painel Admin > Checkout.';
+      }
+      console.error('[ABACATEPAY PIX ERROR]:', friendlyError);
       return res.status(400).json({
         success: false,
         provider: 'abacatepay',
-        error: typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg),
+        error: friendlyError,
+        rawError,
         orderId,
       });
     }

@@ -24,12 +24,6 @@ import {
   Zap,
 } from 'lucide-react';
 
-declare global {
-  interface Window {
-    MercadoPago?: any;
-  }
-}
-
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -283,7 +277,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   }, [totalAmount, items.length, viewState]);
 
-  // Confetti Animation when Payment is Confirmed by Mercado Pago
+  // Confetti Celebration Animation when Payment is Confirmed by AbacatePay
   useEffect(() => {
     if (viewState === 'success') {
       try {
@@ -500,7 +494,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
-        const errorMsg = data?.error || 'Não foi possível gerar a cobrança PIX no AbacatePay neste momento. Por favor, confira seus dados e tente novamente.';
+        let errorMsg = data?.error || 'Não foi possível gerar a cobrança PIX no AbacatePay neste momento. Por favor, confira seus dados e tente novamente.';
+        if (errorMsg.includes('Invalid or inactive API key')) {
+          errorMsg = 'Chave de API do AbacatePay inválida ou inativa. Acesse o Painel Admin > Checkout & Pagamento para cadastrar sua chave de API ativa do AbacatePay (Configurações > Chaves de API).';
+        } else if (errorMsg.toLowerCase().includes('insufficient permissions') || errorMsg.toLowerCase().includes('permissões insuficientes')) {
+          errorMsg = 'Permissões insuficientes na Chave do AbacatePay. Ao criar a chave no painel do AbacatePay, marque a permissão "TRANSPARENT:CREATE" (Cobranças Transparentes / PIX) ou selecione "Acesso Total". Crie uma nova chave com permissão total e salve no Painel Admin > Checkout.';
+        }
         setErrorType('communication');
         setFormError(errorMsg);
       }
@@ -582,7 +581,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             order_status: 'PAGAMENTO APROVADO',
             pixPayload: pixQrCode || undefined,
             pixQrCodeUrl: pixQrCodeBase64 || undefined,
-            mercadoPagoPaymentId: pixPaymentId,
+            payment_id: pixPaymentId,
+            abacatePayPaymentId: pixPaymentId,
             ticketUrl: pixTicketUrl || undefined,
           });
 

@@ -164,7 +164,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   };
 
   // Generate Real AbacatePay PIX QR Code via Server API
-  const handleGenerateMercadoPagoPix = async () => {
+  const handleGenerateAbacatePayPix = async () => {
     if (!validateCustomerFields()) return;
 
     setMpLoading(true);
@@ -221,10 +221,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           setMpQrCodeBase64(generatedUrl);
         }
       } else {
-        setFormError(
+        let errorMsg =
           data?.error ||
-            'Não foi possível gerar a cobrança PIX no AbacatePay. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.'
-        );
+          'Não foi possível gerar a cobrança PIX no AbacatePay. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.';
+        if (errorMsg.includes('Invalid or inactive API key')) {
+          errorMsg =
+            'Chave de API do AbacatePay inválida ou inativa. Acesse o Painel Admin > Checkout & Pagamento para cadastrar sua chave ativa do AbacatePay.';
+        }
+        setFormError(errorMsg);
       }
     } catch (err: any) {
       console.warn('Falha na rota AbacatePay:', err);
@@ -322,7 +326,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       status: 'completed',
       pixPayload: mpQrCode || undefined,
       pixQrCodeUrl: mpQrCodeBase64 || undefined,
-      mercadoPagoPaymentId: mpPaymentId || undefined,
+      payment_id: mpPaymentId || undefined,
+      abacatePayPaymentId: mpPaymentId || undefined,
       ticketUrl: mpTicketUrl || undefined,
     });
 
@@ -607,12 +612,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </span>
                 </div>
 
-                {/* PIX Flow via Mercado Pago API */}
+                {/* PIX Flow via AbacatePay API */}
                 <div className="bg-[#12141a] border border-white/10 rounded-2xl p-4 text-center space-y-3.5">
                     <div className="flex items-center justify-between border-b border-white/5 pb-2">
                       <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                         <Zap className="w-4 h-4 text-emerald-400" />
-                        <span>PIX Mercado Pago Oficial</span>
+                        <span>PIX AbacatePay Oficial</span>
                       </div>
                       <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                         Aprovação Automática
@@ -620,26 +625,26 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     </div>
 
                     {!mpQrCode ? (
-                      /* CTA to generate Mercado Pago QR Code */
+                      /* CTA to generate AbacatePay QR Code */
                       <div className="py-3 space-y-3">
                         <p className="text-xs text-neutral-300 leading-relaxed">
-                          Ao clicar no botão abaixo, será gerado o <strong>QR Code oficial via Mercado Pago</strong> com liberação instantânea.
+                          Ao clicar no botão abaixo, será gerado o <strong>QR Code oficial via AbacatePay</strong> com liberação instantânea.
                         </p>
                         <button
                           type="button"
-                          onClick={handleGenerateMercadoPagoPix}
+                          onClick={handleGenerateAbacatePayPix}
                           disabled={mpLoading}
                           className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
                         >
                           {mpLoading ? (
                             <>
                               <RefreshCw className="w-4 h-4 animate-spin text-black" />
-                              <span>Gerando QR Code no Mercado Pago...</span>
+                              <span>Gerando QR Code no AbacatePay...</span>
                             </>
                           ) : (
                             <>
                               <QrCode className="w-4 h-4" />
-                              <span>Gerar QR Code PIX (Mercado Pago)</span>
+                              <span>Gerar QR Code PIX (AbacatePay)</span>
                             </>
                           )}
                         </button>
@@ -651,7 +656,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           {mpQrCodeBase64 ? (
                             <img
                               src={mpQrCodeBase64}
-                              alt="QR Code PIX Mercado Pago"
+                              alt="QR Code PIX AbacatePay"
                               className="w-full h-full object-contain"
                             />
                           ) : (
@@ -662,7 +667,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         {/* Status notification */}
                         <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 p-2 rounded-xl">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                          <span>Aguardando confirmação do Mercado Pago...</span>
+                          <span>Aguardando confirmação do AbacatePay...</span>
                         </div>
 
                         {/* Copy Paste Code */}
@@ -696,7 +701,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-[11px] text-neutral-400 hover:text-white underline cursor-pointer"
                           >
-                            <span>Ver comprovante na página do Mercado Pago</span>
+                            <span>Ver comprovante na página do AbacatePay</span>
                             <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
@@ -717,7 +722,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           </div>
                         </div>
 
-                        {/* Status de Confirmação Automática via Mercado Pago */}
+                        {/* Status de Confirmação Automática via AbacatePay */}
                         <div className="bg-[#12141a] border border-emerald-500/30 rounded-xl p-3.5 flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
                             <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
@@ -725,7 +730,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           <div className="text-left flex-1 min-w-0">
                             <p className="text-xs font-bold text-white flex items-center gap-1.5">
                               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                              <span>Aguardando confirmação do Mercado Pago...</span>
+                              <span>Aguardando confirmação do AbacatePay...</span>
                             </p>
                             <p className="text-[11px] text-neutral-400 mt-0.5">
                               Assim que o pagamento for confirmado pelo seu banco, você será redirecionado automaticamente para a Área do Cliente.
@@ -887,7 +892,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </button>
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-400">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Liberação imediata no PIX oficial do Mercado Pago</span>
+                <span>Liberação imediata no PIX oficial do AbacatePay</span>
               </div>
             </div>
           )}

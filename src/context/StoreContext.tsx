@@ -1147,6 +1147,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
       { merge: true }
     ).catch(() => {});
+    setDoc(doc(db, 'site_configs', 'checkout'), checkoutConfig, { merge: true }).catch(() => {});
   }, [checkoutConfig]);
 
   useEffect(() => {

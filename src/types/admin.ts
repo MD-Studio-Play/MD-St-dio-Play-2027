@@ -139,6 +139,7 @@ export interface Order {
   payment_id?: string;
   pixPayload?: string;
   pixQrCodeUrl?: string;
+  abacatePayPaymentId?: string;
   mercadoPagoPaymentId?: string;
   ticketUrl?: string;
   cardLast4?: string;
@@ -152,7 +153,8 @@ export interface Order {
 export interface PaymentRecord {
   id: string;
   order_id: string;
-  mercado_pago_payment_id: string;
+  abacate_pay_payment_id?: string;
+  mercado_pago_payment_id?: string;
   external_reference?: string;
   method: string;
   amount: number;
