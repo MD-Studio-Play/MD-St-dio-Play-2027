@@ -14,31 +14,40 @@ import {
   Sparkles,
   CheckCircle2,
   AlertTriangle,
-  Trash2,
   ExternalLink,
   HelpCircle,
   KeyRound,
   Send,
   RotateCcw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export const CheckoutTab: React.FC = () => {
   const { checkoutConfig, setCheckoutConfig, sendWhatsAppValidationCode, resetCheckoutConfig } = useStore();
   const [resetNotice, setResetNotice] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
-  // AbacatePay Server Status
-  const [abacateStatus, setAbacateStatus] = useState<{
+  // Mercado Pago Server Status
+  const [mpStatus, setMpStatus] = useState<{
     configured?: boolean;
-    hasApiKey?: boolean;
-    hasWebhookSecret?: boolean;
-    isDev?: boolean;
-    keyPrefix?: string | null;
+    hasAccessToken?: boolean;
+    hasPublicKey?: boolean;
+    mode?: 'production' | 'test';
+    isSandbox?: boolean;
+    tokenPrefix?: string | null;
+    seller?: {
+      id?: number;
+      nickname?: string;
+      email?: string;
+      site_id?: string;
+    } | null;
   } | null>(null);
 
   // Form input states
-  const [apiKeyInput, setApiKeyInput] = useState(checkoutConfig.abacatePayApiKey || '');
-  const [webhookSecretInput, setWebhookSecretInput] = useState(checkoutConfig.abacatePayWebhookSecret || '');
+  const [accessTokenInput, setAccessTokenInput] = useState(checkoutConfig.mercadoPagoAccessToken || '');
+  const [publicKeyInput, setPublicKeyInput] = useState(checkoutConfig.mercadoPagoPublicKey || '');
   const [isSandboxInput, setIsSandboxInput] = useState(checkoutConfig.isSandbox ?? false);
 
   // Test connection state
@@ -46,7 +55,8 @@ export const CheckoutTab: React.FC = () => {
     loading: boolean;
     success?: boolean;
     message?: string;
-    isDev?: boolean;
+    seller?: any;
+    isSandbox?: boolean;
   }>({ loading: false });
 
   // Webhook copy feedback
@@ -57,24 +67,24 @@ export const CheckoutTab: React.FC = () => {
   const [waSending, setWaSending] = useState(false);
   const [waResult, setWaResult] = useState<{ success: boolean; message: string; url?: string } | null>(null);
 
-  const fetchAbacateStatus = () => {
-    fetch('/api/abacatepay/status')
+  const fetchMpStatus = () => {
+    fetch('/api/mercadopago/status')
       .then((r) => r.json())
-      .then((d) => setAbacateStatus(d))
+      .then((d) => setMpStatus(d))
       .catch(() => {});
   };
 
   useEffect(() => {
-    fetchAbacateStatus();
+    fetchMpStatus();
   }, []);
 
   // Sync inputs if checkoutConfig updates externally
   useEffect(() => {
-    if (checkoutConfig.abacatePayApiKey && !apiKeyInput) {
-      setApiKeyInput(checkoutConfig.abacatePayApiKey);
+    if (checkoutConfig.mercadoPagoAccessToken && !accessTokenInput) {
+      setAccessTokenInput(checkoutConfig.mercadoPagoAccessToken);
     }
-    if (checkoutConfig.abacatePayWebhookSecret && !webhookSecretInput) {
-      setWebhookSecretInput(checkoutConfig.abacatePayWebhookSecret);
+    if (checkoutConfig.mercadoPagoPublicKey && !publicKeyInput) {
+      setPublicKeyInput(checkoutConfig.mercadoPagoPublicKey);
     }
   }, [checkoutConfig]);
 
@@ -83,15 +93,15 @@ export const CheckoutTab: React.FC = () => {
     setTimeout(() => setSavedNotice(false), 2500);
   };
 
-  // 1. Test Connection with AbacatePay API
+  // 1. Test Connection with Mercado Pago API
   const handleTestConnection = async () => {
     setTestState({ loading: true });
     try {
-      const res = await fetch('/api/abacatepay/test-connection', {
+      const res = await fetch('/api/mercadopago/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiKey: apiKeyInput.trim(),
+          accessToken: accessTokenInput.trim(),
         }),
       });
       const data = await res.json();
@@ -99,22 +109,23 @@ export const CheckoutTab: React.FC = () => {
         setTestState({
           loading: false,
           success: true,
-          message: data.message || 'Conexão com a API do AbacatePay validada com sucesso!',
-          isDev: data.isDev,
+          message: data.message || 'Conexão com o Mercado Pago validada com 100% de sucesso!',
+          seller: data.seller,
+          isSandbox: data.isSandbox,
         });
-        fetchAbacateStatus();
+        fetchMpStatus();
       } else {
         setTestState({
           loading: false,
           success: false,
-          message: data.error || 'Chave de API inválida ou inativa no AbacatePay.',
+          message: data.error || 'Access Token inválido ou expirado no Mercado Pago.',
         });
       }
     } catch (err: any) {
       setTestState({
         loading: false,
         success: false,
-        message: 'Erro de comunicação ao tentar testar a chave no AbacatePay.',
+        message: 'Erro de comunicação ao tentar testar o token no Mercado Pago.',
       });
     }
   };
@@ -122,14 +133,15 @@ export const CheckoutTab: React.FC = () => {
   // 2. Save Config to StoreContext and Backend
   const handleSaveConfig = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanKey = apiKeyInput.trim();
-    const cleanSecret = webhookSecretInput.trim();
+    const cleanToken = accessTokenInput.trim();
+    const cleanPublic = publicKeyInput.trim();
 
     const updated = {
       ...checkoutConfig,
-      pixGateway: 'abacatepay' as const,
-      abacatePayApiKey: cleanKey,
-      abacatePayWebhookSecret: cleanSecret,
+      pixGateway: 'mercadopago' as const,
+      creditCardGateway: 'mercadopago' as const,
+      mercadoPagoAccessToken: cleanToken,
+      mercadoPagoPublicKey: cleanPublic,
       isSandbox: isSandboxInput,
     };
 
@@ -138,21 +150,22 @@ export const CheckoutTab: React.FC = () => {
 
     // Also persist directly to server
     try {
-      await fetch('/api/abacatepay/save-key', {
+      await fetch('/api/mercadopago/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiKey: cleanKey,
-          webhookSecret: cleanSecret,
+          accessToken: cleanToken,
+          publicKey: cleanPublic,
+          isSandbox: isSandboxInput,
         }),
       });
-      fetchAbacateStatus();
+      fetchMpStatus();
     } catch {}
   };
 
   const handleCopyWebhookUrl = () => {
     if (typeof window !== 'undefined') {
-      const url = `${window.location.origin}/api/abacatepay/webhook`;
+      const url = `${window.location.origin}/api/mercadopago/webhook`;
       navigator.clipboard.writeText(url);
       setWebhookCopied(true);
       setTimeout(() => setWebhookCopied(false), 3000);
@@ -189,8 +202,11 @@ export const CheckoutTab: React.FC = () => {
 
   const webhookUrl =
     typeof window !== 'undefined'
-      ? `${window.location.origin}/api/abacatepay/webhook`
-      : 'https://seusite.com/api/abacatepay/webhook';
+      ? `${window.location.origin}/api/mercadopago/webhook`
+      : 'https://seusite.com/api/mercadopago/webhook';
+
+  const isConfigured = mpStatus?.hasAccessToken || (accessTokenInput && accessTokenInput.length > 10);
+  const isProd = accessTokenInput.startsWith('APP_USR-') || (!isSandboxInput && !accessTokenInput.startsWith('TEST-'));
 
   return (
     <div className="space-y-6">
@@ -198,7 +214,7 @@ export const CheckoutTab: React.FC = () => {
       {savedNotice && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#00d06c] text-black font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-3 duration-200">
           <Check className="w-4 h-4 stroke-[3]" />
-          <span>Configurações do AbacatePay salvas com sucesso!</span>
+          <span>Configurações do Mercado Pago salvas com sucesso!</span>
         </div>
       )}
 
@@ -213,17 +229,17 @@ export const CheckoutTab: React.FC = () => {
       <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full bg-[#00d06c]/15 text-[#00d06c] border border-[#00d06c]/30 text-[10px] font-black uppercase tracking-wider">
+            <span className="px-2.5 py-0.5 rounded-full bg-[#009ee3]/15 text-[#009ee3] border border-[#009ee3]/30 text-[10px] font-black uppercase tracking-wider">
               Gateway Oficial Ativo
             </span>
-            <span className="text-xs text-neutral-400 font-mono">AbacatePay v2 PIX</span>
+            <span className="text-xs text-neutral-400 font-mono">Mercado Pago PIX & Cartão</span>
           </div>
           <h3 className="text-lg font-bold text-white flex items-center gap-2 mt-1">
-            <CreditCard className="w-5 h-5 text-[#00d06c]" />
-            <span>Configuração do Gateway PIX — AbacatePay</span>
+            <CreditCard className="w-5 h-5 text-[#009ee3]" />
+            <span>Configuração do Mercado Pago (Provedor Oficial)</span>
           </h3>
           <p className="text-xs text-neutral-400 mt-1 max-w-2xl">
-            Substituição completa do Mercado Pago pelo <strong>AbacatePay</strong>. O checkout gera QR Codes dinâmicos exclusivos para cada cobrança, com conciliação automática via Webhook em tempo real e entrega imediata na Área do Cliente.
+            Integração nativa com a API oficial do <strong>Mercado Pago</strong> para geração de <strong>QR Code PIX dinâmico</strong> com valores calculados em tempo real, confirmação automática via Webhook e liberação imediata dos produtos digitais na Área do Cliente.
           </p>
         </div>
 
@@ -244,16 +260,16 @@ export const CheckoutTab: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LEFT COLUMN: Status do AbacatePay & Diagnóstico */}
+        {/* LEFT COLUMN: Status do Mercado Pago & Diagnóstico */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-[#00d06c]/10 text-[#00d06c]">
+              <div className="p-2 rounded-xl bg-[#009ee3]/10 text-[#009ee3]">
                 <QrCode className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">PIX Dinâmico AbacatePay</h4>
-                <p className="text-[11px] text-neutral-400">Ambiente Real & Banco Central</p>
+                <h4 className="text-sm font-bold text-white">PIX Dinâmico Mercado Pago</h4>
+                <p className="text-[11px] text-neutral-400">Banco Central do Brasil & EMV Oficial</p>
               </div>
             </div>
             <span className="px-2.5 py-1 rounded-full bg-emerald-950 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
@@ -264,138 +280,172 @@ export const CheckoutTab: React.FC = () => {
           <div className="space-y-3 text-xs">
             {/* Status Card */}
             <div className={`p-4 rounded-xl border space-y-2 ${
-              abacateStatus?.hasApiKey
+              isConfigured
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                 : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
             }`}>
               <div className="flex items-center gap-2 font-bold text-sm">
                 <ShieldCheck className="w-4 h-4" />
                 <span>
-                  {abacateStatus?.hasApiKey
-                    ? 'Integração com AbacatePay Ativa'
-                    : 'Aguardando Chave de API do AbacatePay'}
+                  {isConfigured
+                    ? 'Integração com Mercado Pago Ativa'
+                    : 'Aguardando Credencial do Mercado Pago'}
                 </span>
               </div>
               <p className="text-neutral-300 leading-relaxed text-[11px]">
-                {abacateStatus?.hasApiKey
-                  ? 'O servidor está configurado para gerar QR Codes PIX dinâmicos e receber confirmações instantâneas de pagamento.'
-                  : 'Para aceitar pagamentos reais via PIX, gere uma Chave de API no painel do AbacatePay e insira no campo ao lado.'}
+                {isConfigured
+                  ? 'O servidor está configurado e pronto para gerar QR Codes PIX oficiais do Banco Central e conciliar pagamentos em tempo real.'
+                  : 'Para ativar pagamentos reais via PIX, insira o seu Access Token obtido no painel de desenvolvedores do Mercado Pago.'}
               </p>
             </div>
 
-            {/* Informações de Conexão */}
+            {/* Informações da Conta do Vendedor */}
             <div className="bg-black/40 rounded-xl p-4 border border-white/5 space-y-2.5">
               <div className="text-[11px] text-neutral-400 font-semibold uppercase tracking-wider">
-                Status no Servidor:
+                Diagnóstico da Conexão no Servidor:
               </div>
               <div className="space-y-2 text-neutral-300 text-xs font-mono">
                 <div className="flex justify-between items-center py-1 border-b border-white/5">
                   <span className="text-neutral-400">Provedor:</span>
-                  <span className="font-bold text-white">AbacatePay Oficial</span>
-                </div>
-                <div className="flex justify-between items-center py-1 border-b border-white/5">
-                  <span className="text-neutral-400">Chave de API:</span>
-                  <span className={abacateStatus?.hasApiKey ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
-                    {abacateStatus?.keyPrefix || 'Não configurada'}
-                  </span>
+                  <span className="font-bold text-white">Mercado Pago Oficial</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-white/5">
                   <span className="text-neutral-400">Ambiente:</span>
-                  <span className={isSandboxInput || abacateStatus?.isDev ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
-                    {isSandboxInput || abacateStatus?.isDev ? 'Dev Mode (Testes / Sandbox)' : 'Produção (Real)'}
+                  <span className={isProd ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    {isProd ? 'Produção (APP_USR-...)' : 'Modo Sandbox / Testes'}
                   </span>
                 </div>
+                {mpStatus?.seller && (
+                  <>
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-neutral-400">Vendedor:</span>
+                      <span className="text-emerald-400 font-bold">{mpStatus.seller.nickname || 'Identificado'}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-neutral-400">Seller ID:</span>
+                      <span className="text-white">{mpStatus.seller.id}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between items-center py-1">
-                  <span className="text-neutral-400">Webhook Secret:</span>
-                  <span className={abacateStatus?.hasWebhookSecret ? 'text-emerald-400 font-bold' : 'text-neutral-400'}>
-                    {abacateStatus?.hasWebhookSecret ? 'Ativo (Protegido)' : 'Opcional (Padrão)'}
+                  <span className="text-neutral-400">Access Token:</span>
+                  <span className={isConfigured ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                    {mpStatus?.tokenPrefix || (accessTokenInput ? `${accessTokenInput.slice(0, 10)}••••••••` : 'Não configurado')}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Guia de Passo a Passo */}
-            <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-neutral-300 space-y-2.5">
-              <div className="font-bold text-blue-400 flex items-center gap-1.5 text-xs">
+            {/* Guia Passo a Passo Oficial */}
+            <div className="p-4 rounded-xl bg-[#009ee3]/10 border border-[#009ee3]/30 text-xs text-neutral-300 space-y-2.5">
+              <div className="font-bold text-[#009ee3] flex items-center gap-1.5 text-xs">
                 <HelpCircle className="w-4 h-4" />
-                <span>Como Obter sua Chave no AbacatePay:</span>
+                <span>Onde Encontrar seu Access Token no Mercado Pago:</span>
               </div>
               <ol className="space-y-1.5 text-[11px] text-neutral-300 list-decimal list-inside leading-relaxed">
-                <li>Acesse o painel: <a href="https://app.abacatepay.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 underline font-semibold">app.abacatepay.com</a></li>
-                <li>Vá no menu lateral em <strong>Configurações &gt; Chaves de API</strong></li>
-                <li>Crie ou copie sua <strong>API Key</strong></li>
-                <li>Cole no campo <strong>Chave de API do AbacatePay</strong> ao lado e clique em <strong>Salvar Configurações</strong></li>
-                <li>Cadastre a URL do Webhook na aba <strong>Webhooks</strong> do AbacatePay</li>
+                <li>
+                  Acesse:{' '}
+                  <a
+                    href="https://www.mercadopago.com.br/developers/panel"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#009ee3] underline font-semibold inline-flex items-center gap-1"
+                  >
+                    <span>mercadopago.com.br/developers</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </li>
+                <li>Clique em <strong>Suas integrações</strong> e abra sua aplicação (ou crie uma nova selecionando Pagamento Online).</li>
+                <li>No menu lateral, clique em <strong>Credenciais de produção</strong> (ou de teste se estiver homologando).</li>
+                <li>Copie o <strong>Access Token</strong> (começa com <code className="text-emerald-400 font-mono">APP_USR-</code> ou <code className="text-amber-400 font-mono">TEST-</code>).</li>
+                <li>Cole no campo <strong>Access Token do Mercado Pago</strong> ao lado e clique em <strong>Testar Conexão</strong>.</li>
               </ol>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Formulário de Credenciais AbacatePay */}
+        {/* RIGHT COLUMN: Formulário de Credenciais Mercado Pago */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-[#00d06c]/10 text-[#00d06c]">
+              <div className="p-2 rounded-xl bg-[#009ee3]/10 text-[#009ee3]">
                 <KeyRound className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">Credenciais do AbacatePay</h4>
-                <p className="text-[11px] text-neutral-400">Autenticação Segura no Servidor</p>
+                <h4 className="text-sm font-bold text-white">Credenciais da API</h4>
+                <p className="text-[11px] text-neutral-400">Armazenamento Seguro no Servidor</p>
               </div>
             </div>
 
-            {/* Modo Dev / Sandbox Toggle */}
+            {/* Modo Sandbox Toggle */}
             <label className="flex items-center gap-1.5 cursor-pointer text-xs">
               <span className={isSandboxInput ? 'text-amber-400 font-bold' : 'text-neutral-400'}>
-                {isSandboxInput ? 'Dev Mode' : 'Produção'}
+                {isSandboxInput ? 'Sandbox (Testes)' : 'Produção'}
               </span>
               <input
                 type="checkbox"
-                checked={!isSandboxInput}
-                onChange={(e) => {
-                  setIsSandboxInput(!e.target.checked);
-                }}
-                className="w-4 h-4 accent-[#00d06c] cursor-pointer"
+                checked={isSandboxInput}
+                onChange={(e) => setIsSandboxInput(e.target.checked)}
+                className="w-4 h-4 accent-[#009ee3] cursor-pointer"
               />
             </label>
           </div>
 
           <form onSubmit={handleSaveConfig} className="space-y-4 text-xs">
-            {/* API Key Input */}
+            {/* Access Token Input */}
             <div>
               <label className="block text-neutral-300 mb-1 font-semibold flex items-center justify-between">
-                <span>Chave de API do AbacatePay (API Key / Secret)</span>
-                <span className="text-[10px] text-neutral-400 font-mono">Obrigatória</span>
+                <span>Access Token do Mercado Pago</span>
+                <span className="text-[10px] text-neutral-400 font-mono">Obrigatório</span>
               </label>
               <div className="relative">
                 <input
-                  type="password"
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  placeholder="key_xxxxxxxxxxxxxxxxxxxxxxxxxx ou dev_xxxxxxxx"
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white font-mono outline-none focus:border-[#00d06c] text-xs"
+                  type={showToken ? 'text' : 'password'}
+                  value={accessTokenInput}
+                  onChange={(e) => setAccessTokenInput(e.target.value)}
+                  placeholder="APP_USR-xxxxxxxxxxxxxxxxxxxxxxxxxx ou TEST-xxxxxxxx"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 pr-10 text-white font-mono outline-none focus:border-[#009ee3] text-xs"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowToken(!showToken)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                >
+                  {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
+              {accessTokenInput.startsWith('APP_USR-') && (
+                <span className="text-[10px] text-emerald-400 mt-1 block font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Token de Produção Oficial detectado (Pronto para receber pagamentos reais).</span>
+                </span>
+              )}
+              {accessTokenInput.startsWith('TEST-') && (
+                <span className="text-[10px] text-amber-400 mt-1 block font-semibold flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  <span>Token de Teste (Sandbox). Utilize contas de teste para simulação.</span>
+                </span>
+              )}
               <span className="text-[10px] text-neutral-400 mt-1 block">
-                Armazenada de forma protegida no servidor para assinar cobranças PIX e conciliar pagamentos.
+                Utilizado exclusivamente pelo backend para criar cobranças PIX oficiais e verificar o status com autenticação OAuth Bearer.
               </span>
             </div>
 
-            {/* Webhook Secret Input */}
+            {/* Public Key Input (Optional) */}
             <div>
               <label className="block text-neutral-300 mb-1 font-semibold flex items-center justify-between">
-                <span>Segredo do Webhook (Webhook Secret)</span>
+                <span>Public Key do Mercado Pago</span>
                 <span className="text-[10px] text-neutral-500 font-mono">Opcional</span>
               </label>
               <input
                 type="text"
-                value={webhookSecretInput}
-                onChange={(e) => setWebhookSecretInput(e.target.value)}
-                placeholder="whsec_xxxxxxxx ou seu segredo configurado"
-                className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white font-mono outline-none focus:border-[#00d06c] text-xs"
+                value={publicKeyInput}
+                onChange={(e) => setPublicKeyInput(e.target.value)}
+                placeholder="APP_USR-xxxxxxxx ou TEST-xxxxxxxx"
+                className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white font-mono outline-none focus:border-[#009ee3] text-xs"
               />
               <span className="text-[10px] text-neutral-400 mt-1 block">
-                Utilizado para verificar a assinatura digital (HMAC) das notificações de pagamento do AbacatePay.
+                Necessária apenas para tokenização direta de cartões de crédito no frontend.
               </span>
             </div>
 
@@ -404,18 +454,18 @@ export const CheckoutTab: React.FC = () => {
               <button
                 type="button"
                 onClick={handleTestConnection}
-                disabled={testState.loading || !apiKeyInput.trim()}
+                disabled={testState.loading || !accessTokenInput.trim()}
                 className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs flex items-center justify-center gap-2 border border-white/10 transition-all cursor-pointer disabled:opacity-50"
               >
                 {testState.loading ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#00d06c]" />
-                    <span>Testando Conexão com AbacatePay...</span>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#009ee3]" />
+                    <span>Testando Conexão com Mercado Pago...</span>
                   </>
                 ) : (
                   <>
-                    <Zap className="w-3.5 h-3.5 text-[#00d06c]" />
-                    <span>Testar Conexão com AbacatePay</span>
+                    <Zap className="w-3.5 h-3.5 text-[#009ee3]" />
+                    <span>Testar Conexão com Mercado Pago</span>
                   </>
                 )}
               </button>
@@ -437,9 +487,11 @@ export const CheckoutTab: React.FC = () => {
                     )}
                     <span>{testState.message}</span>
                   </div>
-                  {!testState.success && (
-                    <div className="text-[11px] text-neutral-300 pl-6 leading-relaxed">
-                      Certifique-se de copiar a chave completa diretamente do painel do AbacatePay em <strong>Configurações &gt; Chaves de API</strong>. Se estiver usando o modo de testes, certifique-se de copiar uma chave ativa.
+                  {testState.success && testState.seller && (
+                    <div className="text-[11px] text-neutral-300 pl-6 space-y-0.5">
+                      <div>Conta: <strong>{testState.seller.nickname}</strong></div>
+                      <div>ID do Vendedor: <strong>{testState.seller.id}</strong></div>
+                      <div>País / Site: <strong>{testState.seller.site_id}</strong></div>
                     </div>
                   )}
                 </div>
@@ -449,34 +501,34 @@ export const CheckoutTab: React.FC = () => {
             {/* Save Button */}
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl bg-[#00d06c] hover:bg-[#00b85f] text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-[#00d06c]/20 transition-all cursor-pointer active:scale-98"
+              className="w-full py-3.5 rounded-xl bg-[#009ee3] hover:bg-[#0082bd] text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-[#009ee3]/20 transition-all cursor-pointer active:scale-98"
             >
               <Check className="w-4 h-4 stroke-[3]" />
-              <span>Salvar Configurações do AbacatePay</span>
+              <span>Salvar Configurações do Mercado Pago</span>
             </button>
           </form>
 
-          {/* AbacatePay Webhook Information Box */}
-          <div className="p-3.5 rounded-xl bg-[#00d06c]/10 border border-[#00d06c]/30 text-xs text-neutral-300 space-y-2 mt-4">
-            <div className="flex items-center gap-2 font-bold text-[#00d06c]">
+          {/* Mercado Pago Webhook Information Box */}
+          <div className="p-3.5 rounded-xl bg-[#009ee3]/10 border border-[#009ee3]/30 text-xs text-neutral-300 space-y-2 mt-4">
+            <div className="flex items-center gap-2 font-bold text-[#009ee3]">
               <Globe className="w-4 h-4" />
-              <span>URL do Webhook Oficial do AbacatePay</span>
+              <span>URL do Webhook Oficial do Mercado Pago</span>
             </div>
             <p className="text-[11px] text-neutral-400 leading-relaxed">
-              Cadastre esta URL no painel do AbacatePay (menu <strong>Webhooks &gt; Adicionar Webhook</strong>):
+              Cadastre esta URL no painel do Mercado Pago (menu <strong>Suas integrações &gt; Webhooks / Notificações IPN</strong>):
             </p>
             <div className="flex items-center justify-between gap-2 bg-black/60 p-2.5 rounded-lg border border-white/10 font-mono text-[11px] text-white">
               <span className="truncate select-all">{webhookUrl}</span>
               <button
                 type="button"
                 onClick={handleCopyWebhookUrl}
-                className="px-2.5 py-1 rounded bg-[#00d06c] hover:bg-[#00b85f] text-black font-extrabold text-[10px] shrink-0 cursor-pointer transition-all"
+                className="px-2.5 py-1 rounded bg-[#009ee3] hover:bg-[#0082bd] text-white font-extrabold text-[10px] shrink-0 cursor-pointer transition-all"
               >
                 {webhookCopied ? 'Copiado!' : 'Copiar URL'}
               </button>
             </div>
             <p className="text-[10px] text-neutral-400">
-              Evento obrigatório para ativar no AbacatePay: <strong>billing.paid</strong> (e <strong>checkout.completed</strong>).
+              Evento a marcar no Mercado Pago: <strong>Pagamentos (payment)</strong>.
             </p>
           </div>
         </div>

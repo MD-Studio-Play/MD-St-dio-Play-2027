@@ -197,10 +197,8 @@ const DEFAULT_CART: CartConfig = {
 };
 
 const DEFAULT_CHECKOUT: CheckoutConfig = {
-  pixGateway: 'abacatepay',
-  abacatePayApiKey: '',
-  abacatePayWebhookSecret: '',
-  creditCardGateway: 'abacatepay',
+  pixGateway: 'mercadopago',
+  creditCardGateway: 'mercadopago',
   creditCardPublicKey: '',
   creditCardSecretToken: '',
   mercadoPagoAccessToken: '',

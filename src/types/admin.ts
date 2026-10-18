@@ -79,10 +79,10 @@ export interface CartConfig {
 }
 
 export interface CheckoutConfig {
-  pixGateway?: 'abacatepay';
+  pixGateway?: 'mercadopago' | 'abacatepay';
   abacatePayApiKey?: string;
   abacatePayWebhookSecret?: string;
-  creditCardGateway: 'abacatepay' | 'mercadopago' | 'stripe' | 'asaas' | 'pagbank';
+  creditCardGateway: 'mercadopago' | 'abacatepay' | 'stripe' | 'asaas' | 'pagbank';
   creditCardPublicKey: string;
   creditCardSecretToken: string;
   mercadoPagoAccessToken?: string;

@@ -11,6 +11,7 @@ import {
   Copy,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Clock,
   ExternalLink,
   Download,
@@ -85,6 +86,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [pixTicketUrl, setPixTicketUrl] = useState<string | null>(null);
   const [pixCopied, setPixCopied] = useState(false);
   const [pixCountdown, setPixCountdown] = useState(600); // 10 minutes
+  const [isPixDevMode, setIsPixDevMode] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
 
   // Completed Order Metadata
   const [completedOrder, setCompletedOrder] = useState<{
@@ -191,7 +194,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const verifyPaymentOnBackend = async (paymentId: string | null, externalReference: string | null) => {
     setIsVerifying(true);
     try {
-      const res = await fetch('/api/abacatepay/verify-order', {
+      const res = await fetch('/api/mercadopago/verify-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentId, externalReference }),
@@ -202,7 +205,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setCompletedOrder({
           orderId: data.order.id || data.externalReference || externalReference || '#ORD-CONFIRMADO',
           total: data.amount || data.order.total || totalAmount,
-          paymentMethod: data.order.paymentMethod || 'PIX (AbacatePay)',
+          paymentMethod: data.order.paymentMethod || 'PIX (Mercado Pago)',
           date: new Date().toLocaleDateString('pt-BR'),
           items: data.order.items || items.map((i) => i.pack),
           postSaleUrls: data.order.post_sale_urls || [],
@@ -443,7 +446,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-      const response = await fetch('/api/abacatepay/create-pix', {
+      const response = await fetch('/api/mercadopago/create-pix', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -482,7 +485,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setCompletedOrder({
           orderId: data.orderId,
           total: data.totalAmount || effectiveTotal,
-          paymentMethod: 'PIX (AbacatePay)',
+          paymentMethod: 'PIX (Mercado Pago)',
           date: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
           items: items.map((i) => i?.pack || i),
           postSaleUrls: data.postSaleUrls || safeItems.map((i) => i.postSaleUrl).filter(Boolean) as string[],
@@ -494,19 +497,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setViewState('pix_display');
         setPixCountdown(600);
       } else {
-        let errorMsg = data?.error || 'Não foi possível gerar a cobrança PIX no AbacatePay neste momento. Por favor, confira seus dados e tente novamente.';
-        if (errorMsg.includes('Invalid or inactive API key')) {
-          errorMsg = 'Chave de API do AbacatePay inválida ou inativa. Acesse o Painel Admin > Checkout & Pagamento para cadastrar sua chave de API ativa do AbacatePay (Configurações > Chaves de API).';
-        } else if (errorMsg.toLowerCase().includes('insufficient permissions') || errorMsg.toLowerCase().includes('permissões insuficientes')) {
-          errorMsg = 'Permissões insuficientes na Chave do AbacatePay. Ao criar a chave no painel do AbacatePay, marque a permissão "TRANSPARENT:CREATE" (Cobranças Transparentes / PIX) ou selecione "Acesso Total". Crie uma nova chave com permissão total e salve no Painel Admin > Checkout.';
+        let errorMsg = data?.error || 'Não foi possível gerar a cobrança PIX no Mercado Pago neste momento. Por favor, confira seus dados e tente novamente.';
+        if (errorMsg.includes('MERCADO_PAGO_ACCESS_TOKEN')) {
+          errorMsg = 'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para configurar seu Access Token.';
         }
         setErrorType('communication');
         setFormError(errorMsg);
       }
     } catch (err: any) {
-      console.warn('Erro ao conectar com API do AbacatePay:', err);
+      console.warn('Erro ao conectar com API do Mercado Pago:', err);
       setErrorType('communication');
-      setFormError('Falha temporária de comunicação com o AbacatePay. Por favor, tente novamente em instantes.');
+      setFormError('Falha temporária de comunicação com o Mercado Pago. Por favor, tente novamente em instantes.');
     } finally {
       setIsProcessing(false);
       setButtonState('idle');
@@ -531,6 +532,45 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setViewState('checkout');
   };
 
+  const handleSimulatePaymentApproval = async () => {
+    if (!pixPaymentId) return;
+    setIsSimulating(true);
+    try {
+      // Direct instant approval for demo / test mode
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+
+      addOrder({
+        customerName: customerName.trim(),
+        customerEmail: customerEmail.trim(),
+        customerPhone: customerPhone,
+        items: items.map((i) => ({ pack: i.pack, quantity: i.quantity })),
+        subtotal: totalAmount,
+        discount: 0,
+        total: totalAmount,
+        paymentMethod: 'pix',
+        status: 'completed',
+        payment_status: 'approved',
+        order_status: 'PAGAMENTO APROVADO',
+        pixPayload: pixQrCode || undefined,
+        pixQrCodeUrl: pixQrCodeBase64 || undefined,
+        payment_id: pixPaymentId,
+        mercadoPagoPaymentId: pixPaymentId,
+        ticketUrl: pixTicketUrl || undefined,
+      });
+
+      setPendingWhatsAppPhone(customerPhone);
+      loginCustomerDirectWithPhone(customerPhone).catch(() => {});
+      onClearCart();
+      cleanUrlParams();
+      setViewState('success');
+    } catch (err: any) {
+      console.warn('Erro ao processar simulação:', err);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // 2. PIX Real-Time Polling Engine & Countdown
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -552,13 +592,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       });
     }, 1000);
 
-    // Polling AbacatePay Payment Status every 2.5s
+    // Polling Mercado Pago Payment Status every 2.5s
     let isPolling = true;
 
     const pollStatus = async () => {
       if (!isPolling) return;
       try {
-        const res = await fetch(`/api/abacatepay/payment-status/${pixPaymentId}`);
+        const res = await fetch(`/api/mercadopago/payment-status/${pixPaymentId}`);
         const data = await res.json();
 
         if (data.success && (data.status === 'approved' || data.isApproved || data.rawStatus === 'PAID') && isPolling) {
@@ -582,7 +622,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             pixPayload: pixQrCode || undefined,
             pixQrCodeUrl: pixQrCodeBase64 || undefined,
             payment_id: pixPaymentId,
-            abacatePayPaymentId: pixPaymentId,
+            mercadoPagoPaymentId: pixPaymentId,
             ticketUrl: pixTicketUrl || undefined,
           });
 
@@ -598,7 +638,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           isPolling = false;
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
           setErrorType('refused');
-          setFormError('A cobrança PIX expirou ou foi cancelada no AbacatePay.');
+          setFormError('A cobrança PIX expirou ou foi cancelada no Mercado Pago.');
           setViewState('error');
         }
       } catch (err) {
@@ -644,7 +684,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
                 <span>Checkout Seguro</span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  AbacatePay Oficial
+                  Mercado Pago Oficial
                 </span>
               </h2>
               <p className="text-[11px] text-neutral-400">Ambiente criptografado com liberação imediata</p>
@@ -805,7 +845,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <div className="flex items-start gap-2.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <span>
-                      O QR Code e o código <strong>Copia e Cola</strong> são gerados via <strong>AbacatePay (API Oficial v2)</strong> com confirmação automática.
+                      O QR Code e o código <strong>Copia e Cola</strong> são gerados via <strong>Mercado Pago (API Oficial)</strong> com confirmação automática.
                     </span>
                   </div>
                   <div className="flex items-start gap-2.5">
@@ -825,7 +865,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {isProcessing ? (
                     <>
                       <RefreshCw className="w-5 h-5 animate-spin" />
-                      <span>Gerando QR Code PIX no AbacatePay...</span>
+                      <span>Gerando QR Code PIX no Mercado Pago...</span>
                     </>
                   ) : (
                     <>
@@ -839,7 +879,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
 
           {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-              VIEW 2: TELA DO PIX (QR Code, Copia e Cola & Polling em Tempo Real)
+              VIEW 2: TELA DO PIX (QR Code Oficial, Copia e Cola & Polling em Tempo Real)
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
           {viewState === 'pix_display' && (
             <div className="space-y-5 text-center animate-in zoom-in-95 duration-200">
@@ -851,7 +891,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 <p className="text-xs text-neutral-300 max-w-md">
-                  Abra o app do seu banco, escolha <strong>Pagar com PIX</strong> e aponte a câmera para o QR Code abaixo ou clique em <strong>COPIAR CÓDIGO PIX</strong>:
+                  Abra o aplicativo do seu banco, escolha <strong>Pagar com PIX</strong> e aponte a câmera para o QR Code abaixo ou clique em <strong>COPIAR CÓDIGO PIX</strong>:
                 </p>
 
                 {/* QR Code Container */}
@@ -859,7 +899,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {pixQrCodeBase64 ? (
                     <img
                       src={pixQrCodeBase64}
-                      alt="QR Code PIX AbacatePay"
+                      alt="QR Code PIX Oficial Mercado Pago"
                       className="w-52 h-52 sm:w-60 sm:h-60 object-contain mx-auto"
                     />
                   ) : (
@@ -906,14 +946,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </button>
 
                 <p className="text-[11px] text-neutral-400">
-                  Após pagar no seu banco, o sistema confirma o pagamento automaticamente em tempo real sem precisar enviar comprovante.
+                  Após pagar no seu banco, o Mercado Pago processa e confirma o pagamento automaticamente em tempo real sem precisar enviar comprovante.
                 </p>
               </div>
 
               {/* Live Polling Spinner Indicator */}
               <div className="py-2.5 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center gap-2 text-xs text-neutral-200">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                <span className="font-medium">🔄 Verificando confirmação do pagamento em tempo real no AbacatePay...</span>
+                <span className="font-medium">🔄 Verificando confirmação do pagamento em tempo real no Mercado Pago...</span>
+              </div>
+
+              {/* Informações de Segurança Mercado Pago */}
+              <div className="p-3 bg-black/40 rounded-xl border border-white/5 text-[11px] text-neutral-300 flex items-center justify-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Cobrança Oficial processada pelo <strong>Mercado Pago</strong> com registro no <strong>Banco Central do Brasil</strong>.</span>
               </div>
 
               <button
@@ -1061,7 +1107,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div>
-                <h3 className="text-xl font-black text-white">Verificando com o AbacatePay...</h3>
+                <h3 className="text-xl font-black text-white">Verificando com o Mercado Pago...</h3>
                 <p className="text-xs text-neutral-300 mt-2 max-w-sm mx-auto leading-relaxed">
                   Aguarde um momento enquanto confirmamos a aprovação do seu pagamento em tempo real.
                 </p>
@@ -1086,7 +1132,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div>
                 <h3 className="text-xl font-black text-white">Pagamento em Análise</h3>
                 <p className="text-xs text-neutral-300 mt-1 max-w-sm mx-auto">
-                  Estamos aguardando a confirmação do seu pagamento pelo AbacatePay.
+                  Estamos aguardando a confirmação do seu pagamento pelo Mercado Pago.
                 </p>
               </div>
 
@@ -1094,7 +1140,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <p>Assim que o pagamento for aprovado, seus arquivos serão liberados automaticamente na Área do Cliente.</p>
                 <div className="flex items-center justify-center gap-2 text-yellow-400 font-bold pt-1">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Sincronizando status no AbacatePay...</span>
+                  <span>Sincronizando status no Mercado Pago...</span>
                 </div>
               </div>
 
@@ -1129,7 +1175,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
                     : 'bg-red-500/20 text-red-400 border border-red-500/40'
                 }`}>
-                  <span>{errorType === 'communication' ? '⚠️ Comunicação com AbacatePay' : '❌ Pagamento recusado / expirado'}</span>
+                  <span>{errorType === 'communication' ? '⚠️ Comunicação com Mercado Pago' : '❌ Pagamento recusado / expirado'}</span>
                 </div>
               </div>
 
@@ -1146,7 +1192,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <p className="text-xs text-neutral-300 mt-1 max-w-sm mx-auto leading-relaxed">
                   {formError || (errorType === 'communication'
-                    ? 'Clique no botão abaixo para gerar uma nova cobrança PIX no AbacatePay.'
+                    ? 'Clique no botão abaixo para gerar uma nova cobrança PIX no Mercado Pago.'
                     : 'A cobrança PIX expirou ou não foi confirmada. Você pode gerar um novo QR Code a qualquer momento.')
                   }
                 </p>
@@ -1160,7 +1206,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
                 <ul className="space-y-1.5 text-[11px] text-neutral-300 list-disc list-inside">
                   <li><strong>Verifique os dados informados:</strong> confira se o nome completo, e-mail e WhatsApp com DDD estão preenchidos corretamente.</li>
-                  <li><strong>Chave de API AbacatePay:</strong> verifique se a chave de API do AbacatePay está configurada nas variáveis do servidor ou no Painel Admin &gt; Checkout.</li>
+                  <li><strong>Credencial do Mercado Pago:</strong> verifique se o Access Token do Mercado Pago está configurado no servidor ou no Painel Admin &gt; Checkout.</li>
                   <li><strong>Tentar novamente:</strong> clique em "GERAR NOVO PIX" para obter um novo QR Code exclusivo e instantâneo.</li>
                 </ul>
               </div>
