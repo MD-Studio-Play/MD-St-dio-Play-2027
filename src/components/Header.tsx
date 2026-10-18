@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, ShoppingCart, X, Menu } from 'lucide-react';
+import { Search, ShoppingCart, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 
 export type TopMenuTab = 'playbacks' | 'midi_variados' | 'midi_gospel' | 'flyer_show';
@@ -7,7 +7,7 @@ export type TopMenuTab = 'playbacks' | 'midi_variados' | 'midi_gospel' | 'flyer_
 interface HeaderProps {
   searchQuery: string;
   onSearchChange: (val: string) => void;
-  onOpenMenu: () => void;
+  onOpenMenu?: () => void;
   onOpenCart: () => void;
   cartCount: number;
   activeTab?: TopMenuTab;
@@ -35,8 +35,8 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="w-full bg-[#1b1c20] border-b border-white/[0.08] sticky top-0 z-40 shadow-lg">
       <div className="max-w-[1440px] mx-auto px-3 sm:px-5 py-2 sm:py-2.5">
         <div className="flex items-center justify-between gap-3 md:gap-5">
-          {/* LEFT: Official MD STÚDIO Logo (Round emblem + Rectangular box identical to image) */}
-          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          {/* LEFT: Official MD STÚDIO Logo (Desktop only: excluded on mobile and tablet) */}
+          <div className="hidden lg:flex items-center gap-2 sm:gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -206,16 +206,6 @@ export const Header: React.FC<HeaderProps> = ({
                   {cartCount}
                 </span>
               )}
-            </button>
-
-            {/* Mobile Hamburger menu toggle (only on small screens) */}
-            <button
-              type="button"
-              onClick={onOpenMenu}
-              aria-label="Abrir menu de navegação"
-              className="lg:hidden p-2 rounded-xl bg-black/40 border border-white/10 hover:border-white/20 text-neutral-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
-            >
-              <Menu className="w-5 h-5 stroke-[2.2]" />
             </button>
           </div>
         </div>
