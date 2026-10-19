@@ -209,69 +209,6 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
         </div>
-
-        {/* MOBILE / TABLET NAV ROW: The 4 tabs scrollable below for mobile users */}
-        <div className="lg:hidden flex items-center gap-3 overflow-x-auto no-scrollbar pt-2.5 pb-0.5 border-t border-white/[0.06] mt-2">
-          <button
-            type="button"
-            onClick={() => handleTabClick('playbacks')}
-            className={`text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 ${
-              activeTab === 'playbacks'
-                ? 'text-[#f59e0b]'
-                : 'text-white hover:text-[#f59e0b]'
-            }`}
-          >
-            <span>PlayBacks</span>
-            {activeTab === 'playbacks' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabClick('midi_variados')}
-            className={`text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 ${
-              activeTab === 'midi_variados'
-                ? 'text-[#f59e0b]'
-                : 'text-white hover:text-[#f59e0b]'
-            }`}
-          >
-            <span>MIDI Variados</span>
-            {activeTab === 'midi_variados' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabClick('midi_gospel')}
-            className={`text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 ${
-              activeTab === 'midi_gospel'
-                ? 'text-[#f59e0b]'
-                : 'text-white hover:text-[#f59e0b]'
-            }`}
-          >
-            <span>MIDI Gospel</span>
-            {activeTab === 'midi_gospel' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabClick('flyer_show')}
-            className={`text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 ${
-              activeTab === 'flyer_show'
-                ? 'text-[#f59e0b]'
-                : 'text-white hover:text-[#f59e0b]'
-            }`}
-          >
-            <span>Flyer Show</span>
-            {activeTab === 'flyer_show' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
-            )}
-          </button>
-        </div>
       </div>
     </header>
   );

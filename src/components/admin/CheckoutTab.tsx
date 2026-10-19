@@ -164,8 +164,8 @@ export const CheckoutTab: React.FC = () => {
   };
 
   const handleCopyWebhookUrl = () => {
-    if (typeof window !== 'undefined') {
-      const url = `${window.location.origin}/api/mercadopago/webhook`;
+    const url = 'https://mdstudioplay.com.br/api/mercadopago/webhook';
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(url);
       setWebhookCopied(true);
       setTimeout(() => setWebhookCopied(false), 3000);
@@ -200,10 +200,7 @@ export const CheckoutTab: React.FC = () => {
     }
   };
 
-  const webhookUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/api/mercadopago/webhook`
-      : 'https://seusite.com/api/mercadopago/webhook';
+  const webhookUrl = 'https://mdstudioplay.com.br/api/mercadopago/webhook';
 
   const isConfigured = mpStatus?.hasAccessToken || (accessTokenInput && accessTokenInput.length > 10);
   const isProd = accessTokenInput.startsWith('APP_USR-') || (!isSandboxInput && !accessTokenInput.startsWith('TEST-'));
@@ -518,13 +515,23 @@ export const CheckoutTab: React.FC = () => {
               Cadastre esta URL no painel do Mercado Pago (menu <strong>Suas integrações &gt; Webhooks / Notificações IPN</strong>):
             </p>
             <div className="flex items-center justify-between gap-2 bg-black/60 p-2.5 rounded-lg border border-white/10 font-mono text-[11px] text-white">
-              <span className="truncate select-all">{webhookUrl}</span>
+              <span className="select-all break-all text-[#009ee3] font-bold">{webhookUrl}</span>
               <button
                 type="button"
                 onClick={handleCopyWebhookUrl}
-                className="px-2.5 py-1 rounded bg-[#009ee3] hover:bg-[#0082bd] text-white font-extrabold text-[10px] shrink-0 cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-md bg-[#009ee3] hover:bg-[#0082bd] text-white font-extrabold text-[11px] shrink-0 cursor-pointer transition-all shadow active:scale-95 flex items-center gap-1.5"
               >
-                {webhookCopied ? 'Copiado!' : 'Copiar URL'}
+                {webhookCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <span>Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copiar URL</span>
+                  </>
+                )}
               </button>
             </div>
             <p className="text-[10px] text-neutral-400">
