@@ -24,6 +24,7 @@ import { ExtraCategoryView } from './components/ExtraCategoryView';
 import { FlyerShowPage } from './components/FlyerShowPage';
 import { MidiPageView } from './components/MidiPageView';
 import { CheckoutModal } from './components/CheckoutModal';
+import { MercadoPagoIntegrationModal } from './components/MercadoPagoIntegrationModal';
 import { SearchX, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -33,6 +34,8 @@ export default function App() {
     setIsAdminMode,
     themeConfig,
     setIsCustomerAreaOpen,
+    isMercadoPagoModalOpen,
+    setIsMercadoPagoModalOpen,
   } = useStore();
 
   // Public Storefront State
@@ -228,6 +231,14 @@ export default function App() {
       if (params.get('admin') === 'true' || params.get('painel') === 'true') {
         setIsAdminMode(true);
       }
+      if (
+        params.get('mercadopago') === 'true' ||
+        params.get('mp') === 'true' ||
+        params.get('mp_config') === 'true' ||
+        params.get('credenciais') === 'true'
+      ) {
+        setIsMercadoPagoModalOpen(true);
+      }
     } catch {}
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -238,7 +249,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setIsAdminMode]);
+  }, [setIsAdminMode, setIsMercadoPagoModalOpen]);
 
   // If Admin mode is toggled, render the full Administrative Platform
   if (isAdminMode) {
@@ -483,6 +494,27 @@ export default function App() {
         isOpen={isCookieModalOpen}
         onClose={() => setIsCookieModalOpen(false)}
       />
+
+      {/* Compartimento Oficial de Integração Mercado Pago */}
+      <MercadoPagoIntegrationModal
+        isOpen={isMercadoPagoModalOpen}
+        onClose={() => setIsMercadoPagoModalOpen(false)}
+      />
+
+      {/* Floating Quick Access: Compartimento Mercado Pago Definitivo */}
+      <div className="fixed bottom-4 left-4 z-40 hidden sm:block">
+        <button
+          type="button"
+          onClick={() => setIsMercadoPagoModalOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#111216]/95 hover:bg-[#181a20] border border-[#009ee3]/50 hover:border-[#009ee3] text-white text-[11px] font-bold shadow-2xl shadow-black/80 backdrop-blur-md transition-all cursor-pointer group active:scale-95"
+          title="Abrir Compartimento de Integração do Mercado Pago"
+        >
+          <span className="w-2 h-2 rounded-full bg-[#009ee3] animate-pulse" />
+          <span className="text-[#009ee3] group-hover:text-white transition-colors">
+            Mercado Pago Definitivo
+          </span>
+        </button>
+      </div>
 
       {/* Footer */}
       <Footer onOpenCookiePreferences={() => setIsCookieModalOpen(true)} />

@@ -37,6 +37,7 @@ export const CustomerAreaModal: React.FC = () => {
     orders,
     updateOrderStatus,
     setIsAdminMode,
+    setIsMercadoPagoModalOpen,
     themeConfig,
   } = useStore();
 
@@ -448,16 +449,29 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
               <span>Voltar para a Loja Virtual</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setIsCustomerAreaOpen(false);
-                setIsAdminMode(true);
-              }}
-              className="text-[11px] text-neutral-500 hover:text-neutral-400 transition-colors cursor-pointer"
-            >
-              Acesso Restrito do Administrador
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomerAreaOpen(false);
+                  setIsAdminMode(true);
+                }}
+                className="text-[11px] text-neutral-500 hover:text-neutral-400 transition-colors cursor-pointer"
+              >
+                Acesso do Administrador
+              </button>
+              <span className="text-neutral-600">·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomerAreaOpen(false);
+                  setIsMercadoPagoModalOpen(true);
+                }}
+                className="text-[11px] text-[#009ee3] hover:underline transition-colors cursor-pointer font-bold"
+              >
+                ⚙️ Mercado Pago Definitivo
+              </button>
+            </div>
           </div>
         </div>
       ) : (

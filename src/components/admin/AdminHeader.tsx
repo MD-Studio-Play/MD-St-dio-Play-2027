@@ -93,10 +93,15 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
             </span>
 
             {/* Gateway Status */}
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-950/60 border border-blue-500/30 text-blue-400 text-[10px] uppercase">
+            <button
+              type="button"
+              onClick={() => onSelectTab('checkout')}
+              title="Abrir Compartimento de Integração Definitiva do Mercado Pago"
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#009ee3]/15 border border-[#009ee3]/40 text-[#009ee3] hover:bg-[#009ee3]/25 transition-colors text-[10px] font-bold cursor-pointer uppercase"
+            >
               <ShieldCheck className="w-3 h-3" />
-              <span>{checkoutConfig.creditCardGateway} ({checkoutConfig.isSandbox ? 'Test' : 'Live'})</span>
-            </span>
+              <span>Mercado Pago ({checkoutConfig.isSandbox ? 'Test' : 'Definitivo'})</span>
+            </button>
 
             {/* Firebase Status */}
             {firebaseConfig.isConnected && (
