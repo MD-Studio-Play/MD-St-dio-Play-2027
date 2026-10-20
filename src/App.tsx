@@ -501,21 +501,6 @@ export default function App() {
         onClose={() => setIsMercadoPagoModalOpen(false)}
       />
 
-      {/* Floating Quick Access: Compartimento Mercado Pago Definitivo */}
-      <div className="fixed bottom-4 left-4 z-40 hidden sm:block">
-        <button
-          type="button"
-          onClick={() => setIsMercadoPagoModalOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#111216]/95 hover:bg-[#181a20] border border-[#009ee3]/50 hover:border-[#009ee3] text-white text-[11px] font-bold shadow-2xl shadow-black/80 backdrop-blur-md transition-all cursor-pointer group active:scale-95"
-          title="Abrir Compartimento de Integração do Mercado Pago"
-        >
-          <span className="w-2 h-2 rounded-full bg-[#009ee3] animate-pulse" />
-          <span className="text-[#009ee3] group-hover:text-white transition-colors">
-            Mercado Pago Definitivo
-          </span>
-        </button>
-      </div>
-
       {/* Footer */}
       <Footer onOpenCookiePreferences={() => setIsCookieModalOpen(true)} />
     </div>

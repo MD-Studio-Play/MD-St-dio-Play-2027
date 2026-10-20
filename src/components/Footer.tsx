@@ -8,7 +8,7 @@ interface FooterProps {
 }
 
 export const Footer: React.FC<FooterProps> = () => {
-  const { footerConfig, themeConfig, setIsAdminMode, setIsMercadoPagoModalOpen } = useStore();
+  const { footerConfig, themeConfig, setIsAdminMode } = useStore();
 
   return (
     <footer className="w-full bg-[#08090b] border-t border-white/[0.06] pt-12 pb-14 px-4 sm:px-6 mt-16">
@@ -37,22 +37,14 @@ export const Footer: React.FC<FooterProps> = () => {
           <span>Áudios Masterizados em 320kbps</span>
         </div>
 
-        {/* Subtle Admin & Mercado Pago Integration Access */}
-        <div className="mt-8 pt-4 border-t border-white/[0.04] flex flex-wrap items-center justify-center gap-4 text-[11px] text-neutral-500">
+        {/* Subtle Admin Access */}
+        <div className="mt-8 pt-4 border-t border-white/[0.04] flex items-center justify-center text-[11px] text-neutral-600">
           <button
             type="button"
             onClick={() => setIsAdminMode(true)}
-            className="hover:text-neutral-300 transition-colors cursor-pointer"
+            className="hover:text-neutral-400 transition-colors cursor-pointer"
           >
             Gestão Administrativa
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => setIsMercadoPagoModalOpen(true)}
-            className="text-[#009ee3] hover:underline transition-colors cursor-pointer font-bold flex items-center gap-1"
-          >
-            <span>💳 Integrar Mercado Pago Definitivo</span>
           </button>
         </div>
       </div>
