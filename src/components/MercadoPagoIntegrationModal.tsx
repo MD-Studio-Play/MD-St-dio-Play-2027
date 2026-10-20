@@ -84,9 +84,16 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
 
   const fetchServerStatus = async () => {
     try {
-      const res = await fetch('/api/mercadopago/status');
-      const data = await res.json();
-      setServerStatus(data);
+      const res = await fetch('/api/mercadopago/status', {
+        headers: { Accept: 'application/json' },
+      });
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        if (data && typeof data === 'object') {
+          setServerStatus(data);
+        }
+      } catch {}
     } catch {
       // ignore
     }
@@ -155,9 +162,14 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
     }
   };
 
-  // 1. Test credentials with Mercado Pago API
+  // 1. Test credentials with Mercado Pago API (Server with Direct Fallback)
   const handleTestConnection = async () => {
-    const token = accessTokenInput.trim();
+    let token = accessTokenInput.trim();
+    if (token.toLowerCase().startsWith('bearer ')) {
+      token = token.slice(7).trim();
+    }
+    token = token.replace(/^["']|["']$/g, '').trim();
+
     if (!token) {
       setTestState({
         loading: false,
@@ -168,38 +180,91 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
     }
 
     setTestState({ loading: true, message: undefined });
+
+    let responseData: any = null;
+
+    // Step A: Attempt server-side verification
     try {
       const res = await fetch('/api/mercadopago/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({ accessToken: token }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setTestState({
-          loading: false,
-          success: true,
-          message:
-            data.message ||
-            'Conexão com Mercado Pago validada com 100% de sucesso!',
-          seller: data.seller,
-          isSandbox: data.isSandbox,
-        });
-        fetchServerStatus();
-      } else {
-        setTestState({
-          loading: false,
-          success: false,
-          message:
-            data.error ||
-            'Access Token inválido ou expirado no Mercado Pago. Verifique suas credenciais.',
-        });
+
+      const rawText = await res.text();
+      try {
+        responseData = JSON.parse(rawText);
+      } catch {
+        responseData = null;
       }
-    } catch (err: any) {
+    } catch (serverErr) {
+      console.warn('Servidor local inacessível para test-connection:', serverErr);
+      responseData = null;
+    }
+
+    // Step B: Direct fallback to Mercado Pago API if backend returned non-JSON or network failed
+    if (!responseData || typeof responseData !== 'object') {
+      try {
+        const directRes = await fetch('https://api.mercadopago.com/users/me', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+        });
+        const directText = await directRes.text();
+        let directJson: any = {};
+        try {
+          directJson = JSON.parse(directText);
+        } catch {
+          directJson = {};
+        }
+
+        if (directRes.ok && directJson.id) {
+          const isSandbox = token.startsWith('TEST-');
+          responseData = {
+            success: true,
+            message: `Conexão validada diretamente com Mercado Pago! Vendedor: ${directJson.nickname || 'Autenticado'} (ID: ${directJson.id})`,
+            seller: {
+              id: directJson.id,
+              nickname: directJson.nickname,
+              email: directJson.email,
+              site_id: directJson.site_id,
+            },
+            isSandbox,
+          };
+        } else {
+          responseData = {
+            success: false,
+            error: directJson.message || 'Access Token inválido ou não autorizado no Mercado Pago.',
+          };
+        }
+      } catch (directErr: any) {
+        responseData = {
+          success: false,
+          error: directErr?.message || 'Falha de comunicação ao testar token no Mercado Pago.',
+        };
+      }
+    }
+
+    if (responseData && responseData.success) {
+      setTestState({
+        loading: false,
+        success: true,
+        message: responseData.message || 'Conexão com Mercado Pago validada com 100% de sucesso!',
+        seller: responseData.seller,
+        isSandbox: responseData.isSandbox,
+      });
+      fetchServerStatus();
+    } else {
       setTestState({
         loading: false,
         success: false,
-        message: 'Erro ao se comunicar com a API do Mercado Pago.',
+        message:
+          responseData?.error ||
+          'Access Token inválido ou expirado no Mercado Pago. Verifique suas credenciais em mercadopago.com.br/developers.',
       });
     }
   };
@@ -208,8 +273,14 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
   const [isSaving, setIsSaving] = useState(false);
   const handleSaveDefinitive = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanToken = accessTokenInput.trim();
-    const cleanPublic = publicKeyInput.trim();
+    let cleanToken = accessTokenInput.trim();
+    if (cleanToken.toLowerCase().startsWith('bearer ')) {
+      cleanToken = cleanToken.slice(7).trim();
+    }
+    cleanToken = cleanToken.replace(/^["']|["']$/g, '').trim();
+
+    let cleanPublic = publicKeyInput.trim();
+    cleanPublic = cleanPublic.replace(/^["']|["']$/g, '').trim();
 
     if (!cleanToken) {
       setSaveErrorNotice('O Access Token do Mercado Pago é obrigatório.');
@@ -224,7 +295,10 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
       // Persist to backend and Firestore
       const res = await fetch('/api/mercadopago/save-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({
           accessToken: cleanToken,
           publicKey: cleanPublic,
@@ -232,11 +306,16 @@ export const MercadoPagoIntegrationModal: React.FC<MercadoPagoIntegrationModalPr
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || data.success === false) {
-        throw new Error(
-          data.error || 'Falha ao validar ou salvar credenciais no Mercado Pago.'
-        );
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = null;
+      }
+
+      if (data && data.success === false) {
+        throw new Error(data.error || 'Falha ao salvar no Mercado Pago.');
       }
 
       // Update global context & local storage

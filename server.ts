@@ -506,58 +506,7 @@ function translateMercadoPagoError(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 1. API: Mercado Pago Configuration Status (Safe for Frontend)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-app.get('/api/mercadopago/status', async (_req: Request, res: Response) => {
-  const accessToken = await getMercadoPagoAccessToken();
-  const publicKey = await getMercadoPagoPublicKey();
-  const hasToken = Boolean(accessToken && accessToken.length > 10 && !accessToken.includes('mock-token'));
-  const isSandbox = accessToken.startsWith('TEST-') || publicKey.startsWith('TEST-');
-
-  if (!hasToken) {
-    return res.json({
-      configured: false,
-      hasAccessToken: false,
-      hasPublicKey: Boolean(publicKey),
-      isSandbox,
-      message: 'MERCADO_PAGO_ACCESS_TOKEN não configurado.',
-    });
-  }
-
-  try {
-    const meRes = await fetch('https://api.mercadopago.com/users/me', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (meRes.ok) {
-      const meData: any = await meRes.json();
-      return res.json({
-        configured: true,
-        hasAccessToken: true,
-        hasPublicKey: Boolean(publicKey),
-        isSandbox,
-        isLive: !isSandbox,
-        accountNickname: meData.nickname || 'MD Studio',
-        email: meData.email,
-        siteId: meData.site_id || 'MLB',
-        tokenPrefix: accessToken.substring(0, 12) + '••••••••',
-        publicKeyPrefix: publicKey ? publicKey.substring(0, 12) + '••••••••' : null,
-      });
-    }
-  } catch {}
-
-  return res.json({
-    configured: true,
-    hasAccessToken: true,
-    hasPublicKey: Boolean(publicKey),
-    isSandbox,
-    isLive: !isSandbox,
-    tokenPrefix: accessToken.substring(0, 12) + '••••••••',
-    publicKeyPrefix: publicKey ? publicKey.substring(0, 12) + '••••••••' : null,
-  });
-});
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 2. API: Public Key for MercadoPago.js v2 SDK
+// 1. API: Public Key for MercadoPago.js v2 SDK
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 app.get('/api/mercadopago/public-key', async (_req: Request, res: Response) => {
   const publicKey = await getMercadoPagoPublicKey();
@@ -566,85 +515,6 @@ app.get('/api/mercadopago/public-key', async (_req: Request, res: Response) => {
     publicKey,
     isSandbox: publicKey.startsWith('TEST-'),
   });
-});
-
-app.post('/api/mercadopago/test-connection', async (req: Request, res: Response) => {
-  try {
-    const rawToken = (req.body.accessToken || req.body.mercadoPagoAccessToken || '').trim();
-    const token = await getMercadoPagoAccessToken(rawToken);
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        error: 'Access Token do Mercado Pago não configurado. Por favor, insira o token gerado no painel de desenvolvedores do Mercado Pago.',
-      });
-    }
-    const meRes = await fetch('https://api.mercadopago.com/users/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (meRes.ok) {
-      const meData: any = await meRes.json();
-      const isSandbox = token.startsWith('TEST-');
-      return res.json({
-        success: true,
-        nickname: meData.nickname || 'Conta Mercado Pago',
-        email: meData.email,
-        siteId: meData.site_id,
-        isSandbox,
-        isLive: !isSandbox,
-        message: 'Conexão com o Mercado Pago validada com 100% de sucesso!',
-      });
-    } else {
-      const errData: any = await meRes.json().catch(() => ({}));
-      return res.status(400).json({
-        success: false,
-        error: errData.message || 'Token de acesso inválido ou expirado no Mercado Pago. Verifique suas credenciais em mercadopago.com.br/developers.',
-      });
-    }
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message || 'Erro ao conectar com Mercado Pago' });
-  }
-});
-
-app.post('/api/mercadopago/save-credentials', async (req: Request, res: Response) => {
-  try {
-    const { accessToken, publicKey, isSandbox } = req.body;
-    const cleanToken = (accessToken || '').trim();
-    const cleanPublic = (publicKey || '').trim();
-
-    if (cleanToken && cleanToken.length > 10) {
-      const meRes = await fetch('https://api.mercadopago.com/users/me', {
-        headers: { Authorization: `Bearer ${cleanToken}` },
-      });
-      if (!meRes.ok) {
-        return res.status(400).json({
-          success: false,
-          error: 'O Access Token informado é inválido ou expirado no Mercado Pago.',
-        });
-      }
-    }
-
-    cachedFirestoreMpToken = cleanToken || cachedFirestoreMpToken;
-    cachedFirestoreMpPublic = cleanPublic || cachedFirestoreMpPublic;
-
-    const dataToSave: any = {
-      pixGateway: 'mercadopago',
-      creditCardGateway: 'mercadopago',
-      isSandbox: isSandbox ?? (cleanToken.startsWith('TEST-')),
-    };
-    if (cleanToken) dataToSave.mercadoPagoAccessToken = cleanToken;
-    if (cleanPublic) dataToSave.mercadoPagoPublicKey = cleanPublic;
-
-    await setDoc(doc(db, 'site_settings', 'checkout'), { config: dataToSave }, { merge: true });
-    await setDoc(doc(db, 'site_configs', 'checkout'), dataToSave, { merge: true });
-
-    return res.json({
-      success: true,
-      message: 'Credenciais do Mercado Pago salvas e ativadas com sucesso!',
-      isSandbox: dataToSave.isSandbox,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1066,8 +936,14 @@ app.get('/api/abacatepay/status', async (req: Request, res: Response) => {
 });
 
 app.post('/api/mercadopago/test-connection', async (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
-    const rawToken = (req.body.accessToken || req.body.mercadoPagoAccessToken || req.body.apiKey || '').trim();
+    let rawToken = (req.body.accessToken || req.body.mercadoPagoAccessToken || req.body.apiKey || req.body.token || '').trim();
+    if (rawToken.toLowerCase().startsWith('bearer ')) {
+      rawToken = rawToken.slice(7).trim();
+    }
+    rawToken = rawToken.replace(/^["']|["']$/g, '').trim();
+
     const token = rawToken || (await getMercadoPagoAccessToken());
 
     if (!token || token.length < 10) {
@@ -1078,18 +954,23 @@ app.post('/api/mercadopago/test-connection', async (req: Request, res: Response)
     }
 
     const testRes = await fetch('https://api.mercadopago.com/users/me', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
     });
 
     const userData: any = await testRes.json().catch(() => ({}));
 
     if (testRes.ok && userData.id) {
-      const isSandbox = token.startsWith('TEST-');
+      const isSandbox = token.startsWith('TEST-') || token.toLowerCase().includes('test');
       const seller = {
         id: userData.id,
         nickname: userData.nickname || 'Vendedor Mercado Pago',
         email: userData.email || '',
         site_id: userData.site_id || 'MLB',
+        first_name: userData.first_name || '',
+        last_name: userData.last_name || '',
       };
 
       if (req.body.save && rawToken) {
@@ -1106,16 +987,25 @@ app.post('/api/mercadopago/test-connection', async (req: Request, res: Response)
         success: true,
         message: `Conexão com Mercado Pago validada com 100% de sucesso! Vendedor: ${seller.nickname} (ID: ${seller.id})`,
         seller,
+        nickname: seller.nickname,
+        email: seller.email,
+        siteId: seller.site_id,
         isSandbox,
         isDev: isSandbox,
         mode: isSandbox ? 'test' : 'production',
       });
     } else {
-      const errMessage = userData?.message || 'Access Token inválido ou expirado no Mercado Pago.';
+      let errMessage = 'Access Token inválido ou expirado no Mercado Pago.';
+      if (userData?.message?.includes('UNAUTHORIZED') || userData?.code?.includes('UNAUTHORIZED') || testRes.status === 401 || testRes.status === 403) {
+        errMessage = 'Access Token não autorizado pelo Mercado Pago. Verifique se copiou o token completo em mercadopago.com.br/developers.';
+      } else if (userData?.message) {
+        errMessage = userData.message;
+      }
       return res.status(400).json({
         success: false,
         error: errMessage,
         rawError: userData,
+        statusCode: testRes.status,
       });
     }
   } catch (err: any) {
@@ -1184,6 +1074,10 @@ app.post('/api/mercadopago/save-config', async (req: Request, res: Response) => 
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+app.post('/api/mercadopago/save-credentials', (req: Request, res: Response) => {
+  return (app as any)._router.handle({ ...req, url: '/api/mercadopago/save-config', method: 'POST' }, res);
 });
 
 // Backward compatibility alias for save-key
@@ -2543,6 +2437,26 @@ async function startServer() {
   if (fs.existsSync(publicDir)) {
     app.use(express.static(publicDir));
   }
+
+  // CRITICAL: Any unhandled /api/* request MUST return JSON 404, never index.html!
+  app.all('/api/*', (req: Request, res: Response) => {
+    res.status(404).json({
+      success: false,
+      error: `Endpoint da API não encontrado: ${req.method} ${req.originalUrl || req.path}`,
+    });
+  });
+
+  // Express error handler for API requests
+  app.use((err: any, req: Request, res: Response, next: any) => {
+    if (req.path && req.path.startsWith('/api/')) {
+      console.error('[API Error]', req.method, req.path, err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Erro interno no servidor ao processar requisição.',
+      });
+    }
+    next(err);
+  });
 
   if (!isProduction) {
     const { createServer } = await import('vite');
