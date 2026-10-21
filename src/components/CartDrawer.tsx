@@ -186,6 +186,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           amount: Number(total.toFixed(2)),
           description: `MD Studio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
           idempotencyKey,
+          mercadoPagoAccessToken: checkoutConfig?.mercadoPagoAccessToken || undefined,
           payer: {
             name: customerName.trim(),
             email: customerEmail.trim(),
@@ -203,7 +204,18 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       });
 
       clearTimeout(timeoutId);
-      const data = await response.json().catch(() => null);
+      let data: any = null;
+      try {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          const rawText = await response.text();
+          console.warn('[Cart PIX] Non-JSON response:', rawText.slice(0, 100));
+        }
+      } catch (parseErr) {
+        console.warn('[Cart PIX] JSON parsing error:', parseErr);
+      }
 
       if (data && data.success && data.qrCode && data.paymentId) {
         setMpQrCode(data.qrCode);
@@ -224,9 +236,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         let errorMsg =
           data?.error ||
           'Não foi possível gerar a cobrança PIX no Mercado Pago. Verifique os dados informados (nome, e-mail e WhatsApp com DDD) e tente novamente.';
-        if (errorMsg.includes('MERCADO_PAGO_ACCESS_TOKEN')) {
+        if (errorMsg.includes('MERCADO_PAGO_ACCESS_TOKEN') || errorMsg.includes('Access Token') || data?.requiresToken) {
           errorMsg =
-            'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para cadastrar seu Access Token.';
+            'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para cadastrar seu Access Token definitivo.';
         }
         setFormError(errorMsg);
       }

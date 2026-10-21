@@ -44,63 +44,106 @@ app.use((req, res, next) => {
 let cachedFirestoreMpToken: string | null = null;
 let cachedFirestoreMpPublic: string | null = null;
 
+// Blacklist of expired or placeholder tokens known to fail with 401 Unauthorized
+const EXPIRED_OR_MOCK_TOKENS = new Set([
+  'APP_USR-6022104151117754-093011-1ea1e21f5951dd7e5843aab72506e9eb-697443735',
+  'mock-token',
+  'TEST-mock',
+  'APP_USR-mock',
+]);
+
+function isValidTokenCandidate(token?: string | null): boolean {
+  if (!token) return false;
+  const t = token.trim();
+  if (t.length < 15) return false;
+  if (EXPIRED_OR_MOCK_TOKENS.has(t)) return false;
+  return true;
+}
+
 function getAccessToken(): string {
   const token =
+    cachedFirestoreMpToken ||
     process.env.MERCADO_PAGO_ACCESS_TOKEN ||
     process.env.MERCADOPAGO_ACCESS_TOKEN ||
-    cachedFirestoreMpToken ||
     '';
-  return token.trim();
+  return isValidTokenCandidate(token) ? token.trim() : '';
 }
 
 async function getMercadoPagoAccessToken(fallback?: string): Promise<string> {
-  if (fallback && fallback.trim().length > 10 && !fallback.includes('mock-token')) {
+  // 1. Explicit token from request body (e.g. from Admin or StoreContext)
+  if (fallback && isValidTokenCandidate(fallback)) {
     return fallback.trim();
   }
-  const envToken = (process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
-  if (envToken && envToken.length > 10 && !envToken.includes('mock-token')) {
-    return envToken;
+  // 2. In-memory cached token (saved via /api/mercadopago/save-config)
+  if (cachedFirestoreMpToken && isValidTokenCandidate(cachedFirestoreMpToken)) {
+    return cachedFirestoreMpToken;
   }
-  if (cachedFirestoreMpToken) return cachedFirestoreMpToken;
+  // 3. Firestore stored checkout configuration (official database storage)
   try {
     const snap = await getDoc(doc(db, 'site_settings', 'checkout'));
-    if (snap.exists() && snap.data()?.config?.mercadoPagoAccessToken) {
-      cachedFirestoreMpToken = snap.data().config.mercadoPagoAccessToken.trim();
-      return cachedFirestoreMpToken!;
+    if (snap.exists()) {
+      const t1 = snap.data()?.config?.mercadoPagoAccessToken || snap.data()?.mercadoPagoAccessToken;
+      if (t1 && isValidTokenCandidate(t1)) {
+        cachedFirestoreMpToken = t1.trim();
+        return t1.trim();
+      }
     }
     const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
-    if (snap2.exists() && snap2.data()?.mercadoPagoAccessToken) {
-      cachedFirestoreMpToken = snap2.data().mercadoPagoAccessToken.trim();
-      return cachedFirestoreMpToken!;
+    if (snap2.exists()) {
+      const t2 = snap2.data()?.mercadoPagoAccessToken;
+      if (t2 && isValidTokenCandidate(t2)) {
+        cachedFirestoreMpToken = t2.trim();
+        return t2.trim();
+      }
     }
-  } catch {}
+  } catch (dbErr) {
+    console.warn('[Firestore Token Load Notice]:', dbErr);
+  }
+  // 4. Server environment variable (only if valid and not expired/blacklisted)
+  const envToken = (process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
+  if (envToken && isValidTokenCandidate(envToken)) {
+    return envToken;
+  }
   return '';
 }
 
 // Helper: Retrieve Public Key from environment or public config
 function getPublicKey(): string {
+  if (cachedFirestoreMpPublic && cachedFirestoreMpPublic.trim().length > 5) {
+    return cachedFirestoreMpPublic.trim();
+  }
   const key =
     process.env.MERCADO_PAGO_PUBLIC_KEY ||
     process.env.MERCADOPAGO_PUBLIC_KEY ||
     process.env.VITE_MERCADO_PAGO_PUBLIC_KEY ||
     process.env.VITE_MERCADOPAGO_PUBLIC_KEY ||
-    cachedFirestoreMpPublic ||
     '';
   return key.trim();
 }
 
 async function getMercadoPagoPublicKey(fallback?: string): Promise<string> {
-  if (fallback && fallback.trim().length > 5) return fallback.trim();
-  const envKey = getPublicKey();
-  if (envKey && envKey.length > 5) return envKey;
-  if (cachedFirestoreMpPublic) return cachedFirestoreMpPublic;
+  if (fallback && fallback.trim().length > 5 && !fallback.includes('mock')) return fallback.trim();
+  if (cachedFirestoreMpPublic && cachedFirestoreMpPublic.trim().length > 5) return cachedFirestoreMpPublic;
   try {
     const snap = await getDoc(doc(db, 'site_settings', 'checkout'));
-    if (snap.exists() && snap.data()?.config?.mercadoPagoPublicKey) {
-      cachedFirestoreMpPublic = snap.data().config.mercadoPagoPublicKey.trim();
-      return cachedFirestoreMpPublic!;
+    if (snap.exists()) {
+      const pub1 = snap.data()?.config?.mercadoPagoPublicKey || snap.data()?.mercadoPagoPublicKey;
+      if (pub1 && pub1.trim().length > 5) {
+        cachedFirestoreMpPublic = pub1.trim();
+        return pub1.trim();
+      }
+    }
+    const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
+    if (snap2.exists()) {
+      const pub2 = snap2.data()?.mercadoPagoPublicKey;
+      if (pub2 && pub2.trim().length > 5) {
+        cachedFirestoreMpPublic = pub2.trim();
+        return pub2.trim();
+      }
     }
   } catch {}
+  const envKey = getPublicKey();
+  if (envKey && envKey.length > 5 && !envKey.includes('mock')) return envKey;
   return '';
 }
 
@@ -324,7 +367,7 @@ function translateMercadoPagoError(
   // 1. Status 401: Invalid Credentials
   if (httpStatus === 401 || combined.includes('invalid_token') || combined.includes('unauthorized')) {
     return {
-      message: 'Credenciais de pagamento inválidas ou expiradas no servidor. Entre em contato com o suporte.',
+      message: 'Access Token do Mercado Pago não configurado, inválido ou expirado. Acesse o Painel Admin > Checkout & Pagamento para cadastrar o seu Access Token definitivo.',
       errorCode: 'MP_401_UNAUTHORIZED',
       isTemporary: false,
     };
@@ -537,12 +580,12 @@ async function handleCreatePayment(req: Request, res: Response) {
 
     const accessToken = await getMercadoPagoAccessToken(req.body.mercadoPagoAccessToken || req.body.accessToken);
     if (!accessToken || accessToken.length < 10 || accessToken.includes('mock-token')) {
-      console.error('[MERCADO PAGO SECURITY ERROR]: MERCADO_PAGO_ACCESS_TOKEN is missing or invalid in server environment.');
-      return res.status(500).json({
+      console.warn('[MERCADO PAGO NOTICE]: Access Token is missing or not configured yet.');
+      return res.status(400).json({
         success: false,
         requiresToken: true,
         error:
-          'Sistema de pagamentos em manutenção ou credencial do Mercado Pago ausente no servidor. Entre em contato com o suporte.',
+          'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para cadastrar o seu Access Token definitivo.',
       });
     }
 

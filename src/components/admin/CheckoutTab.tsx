@@ -99,13 +99,19 @@ export const CheckoutTab: React.FC = () => {
     try {
       const res = await fetch('/api/mercadopago/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           accessToken: accessTokenInput.trim(),
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+      if (data && data.success) {
         setTestState({
           loading: false,
           success: true,
@@ -118,14 +124,14 @@ export const CheckoutTab: React.FC = () => {
         setTestState({
           loading: false,
           success: false,
-          message: data.error || 'Access Token inválido ou expirado no Mercado Pago.',
+          message: data?.error || 'Access Token inválido ou não autorizado no Mercado Pago.',
         });
       }
     } catch (err: any) {
       setTestState({
         loading: false,
         success: false,
-        message: 'Erro de comunicação ao tentar testar o token no Mercado Pago.',
+        message: 'Erro de comunicação ao testar o token no Mercado Pago.',
       });
     }
   };

@@ -457,6 +457,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           paymentMethodType: 'pix',
           description,
           idempotencyKey,
+          mercadoPagoAccessToken: checkoutConfig?.mercadoPagoAccessToken || undefined,
           payer: {
             name: customerName.trim(),
             email: customerEmail.trim(),
@@ -468,7 +469,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       });
 
       clearTimeout(timeoutId);
-      const data = await response.json().catch(() => null);
+      let data: any = null;
+      try {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          const rawText = await response.text();
+          console.warn('[Checkout PIX] Non-JSON response:', rawText.slice(0, 100));
+        }
+      } catch (parseErr) {
+        console.warn('[Checkout PIX] JSON parsing error:', parseErr);
+      }
 
       if (data && data.success && data.paymentId && data.qrCode) {
         setPixPaymentId(data.paymentId);
@@ -498,8 +510,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setPixCountdown(600);
       } else {
         let errorMsg = data?.error || 'Não foi possível gerar a cobrança PIX no Mercado Pago neste momento. Por favor, confira seus dados e tente novamente.';
-        if (errorMsg.includes('MERCADO_PAGO_ACCESS_TOKEN')) {
-          errorMsg = 'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para configurar seu Access Token.';
+        if (errorMsg.includes('MERCADO_PAGO_ACCESS_TOKEN') || errorMsg.includes('Access Token') || data?.requiresToken) {
+          errorMsg = 'Credencial do Mercado Pago não configurada no servidor. Acesse o Painel Admin > Checkout & Pagamento para cadastrar o seu Access Token definitivo.';
         }
         setErrorType('communication');
         setFormError(errorMsg);

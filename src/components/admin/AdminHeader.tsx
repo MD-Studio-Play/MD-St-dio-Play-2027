@@ -92,17 +92,6 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
               <span>PIX BRCode Ativo</span>
             </span>
 
-            {/* Gateway Status */}
-            <button
-              type="button"
-              onClick={() => onSelectTab('checkout')}
-              title="Abrir Compartimento de Integração Definitiva do Mercado Pago"
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#009ee3]/15 border border-[#009ee3]/40 text-[#009ee3] hover:bg-[#009ee3]/25 transition-colors text-[10px] font-bold cursor-pointer uppercase"
-            >
-              <ShieldCheck className="w-3 h-3" />
-              <span>Mercado Pago ({checkoutConfig.isSandbox ? 'Test' : 'Definitivo'})</span>
-            </button>
-
             {/* Firebase Status */}
             {firebaseConfig.isConnected && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/30 text-amber-400 text-[10px]">
