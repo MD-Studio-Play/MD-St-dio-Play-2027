@@ -23,8 +23,6 @@ import { CustomerAreaModal } from './components/CustomerAreaModal';
 import { ExtraCategoryView } from './components/ExtraCategoryView';
 import { FlyerShowPage } from './components/FlyerShowPage';
 import { MidiPageView } from './components/MidiPageView';
-import { CheckoutModal } from './components/CheckoutModal';
-import { MercadoPagoIntegrationModal } from './components/MercadoPagoIntegrationModal';
 import { SearchX, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -34,8 +32,6 @@ export default function App() {
     setIsAdminMode,
     themeConfig,
     setIsCustomerAreaOpen,
-    isMercadoPagoModalOpen,
-    setIsMercadoPagoModalOpen,
   } = useStore();
 
   // Public Storefront State
@@ -59,31 +55,13 @@ export default function App() {
   // Drawers & Modals
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
-  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
-  const [checkoutInitialView, setCheckoutInitialView] = useState<'checkout' | 'success' | 'pending' | 'error'>('checkout');
 
-  // Handle direct payment routes (/pagamento/sucesso, /pagamento/pendente, /pagamento/erro, /checkout, /area-do-cliente)
+  // Handle direct navigation routes (/area-do-cliente)
   useEffect(() => {
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     if (path.includes('/area-do-cliente') || hash.includes('area-do-cliente')) {
       setIsCustomerAreaOpen(true);
-      window.history.replaceState(null, '', '/');
-    } else if (path.includes('/pagamento/sucesso') || hash.includes('sucesso')) {
-      setCheckoutInitialView('success');
-      setIsCheckoutModalOpen(true);
-      window.history.replaceState(null, '', '/');
-    } else if (path.includes('/pagamento/pendente') || hash.includes('pendente')) {
-      setCheckoutInitialView('pending');
-      setIsCheckoutModalOpen(true);
-      window.history.replaceState(null, '', '/');
-    } else if (path.includes('/pagamento/erro') || hash.includes('erro')) {
-      setCheckoutInitialView('error');
-      setIsCheckoutModalOpen(true);
-      window.history.replaceState(null, '', '/');
-    } else if (path.includes('/checkout') || hash.includes('checkout')) {
-      setCheckoutInitialView('checkout');
-      setIsCheckoutModalOpen(true);
       window.history.replaceState(null, '', '/');
     }
   }, [setIsCustomerAreaOpen]);
@@ -231,14 +209,6 @@ export default function App() {
       if (params.get('admin') === 'true' || params.get('painel') === 'true') {
         setIsAdminMode(true);
       }
-      if (
-        params.get('mercadopago') === 'true' ||
-        params.get('mp') === 'true' ||
-        params.get('mp_config') === 'true' ||
-        params.get('credenciais') === 'true'
-      ) {
-        setIsMercadoPagoModalOpen(true);
-      }
     } catch {}
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -249,7 +219,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setIsAdminMode, setIsMercadoPagoModalOpen]);
+  }, [setIsAdminMode]);
 
   // If Admin mode is toggled, render the full Administrative Platform
   if (isAdminMode) {
@@ -451,23 +421,6 @@ export default function App() {
         onRemoveItem={handleRemoveCartItem}
         onUpdateQuantity={handleUpdateQuantity}
         onClearCart={handleClearCart}
-        onOpenCheckout={() => {
-          setCheckoutInitialView('checkout');
-          setIsCheckoutModalOpen(true);
-        }}
-      />
-
-      {/* Professional Mercado Pago Checkout Modal */}
-      <CheckoutModal
-        isOpen={isCheckoutModalOpen}
-        onClose={() => {
-          setIsCheckoutModalOpen(false);
-          setCheckoutInitialView('checkout');
-        }}
-        items={cartItems}
-        onClearCart={handleClearCart}
-        initialView={checkoutInitialView}
-        onResetInitialView={() => setCheckoutInitialView('checkout')}
       />
 
       {/* Side Menu Drawer */}
@@ -493,12 +446,6 @@ export default function App() {
       <CookieModal
         isOpen={isCookieModalOpen}
         onClose={() => setIsCookieModalOpen(false)}
-      />
-
-      {/* Compartimento Oficial de Integração Mercado Pago */}
-      <MercadoPagoIntegrationModal
-        isOpen={isMercadoPagoModalOpen}
-        onClose={() => setIsMercadoPagoModalOpen(false)}
       />
 
       {/* Footer */}

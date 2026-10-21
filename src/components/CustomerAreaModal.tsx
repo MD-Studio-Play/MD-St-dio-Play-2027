@@ -569,11 +569,11 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
                     <div className="flex items-center gap-2.5 text-amber-400">
                       <Clock className="w-5 h-5 shrink-0" />
                       <span className="text-xs font-bold uppercase tracking-wider">
-                        Pagamento Pendente · Aguardando Confirmação do Mercado Pago
+                        Pedido Registrado · Aguardando Liberação
                       </span>
                     </div>
                     <p className="text-xs text-neutral-300">
-                      Seu pedido foi registrado! Assim que o pagamento via PIX for confirmado pelo Mercado Pago, seus downloads serão liberados instantaneamente nesta tela.
+                      Seu pedido foi registrado! Assim que o atendimento confirmar o envio, seus downloads ficarão disponíveis diretamente nesta tela.
                     </p>
                     <div className="p-3 bg-black/40 rounded-xl border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />

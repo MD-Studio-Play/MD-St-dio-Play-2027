@@ -31,7 +31,7 @@ export const Footer: React.FC<FooterProps> = () => {
           <span className="hidden sm:inline text-neutral-600">·</span>
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Pagamento Seguro via PIX Oficial</span>
+            <span>Atendimento Rápido e Suporte Dedicado</span>
           </div>
           <span className="hidden sm:inline text-neutral-600">·</span>
           <span>Áudios Masterizados em 320kbps</span>

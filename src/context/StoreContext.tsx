@@ -87,8 +87,6 @@ interface StoreContextType {
   customerUser: CustomerUser | null;
   isCustomerAreaOpen: boolean;
   setIsCustomerAreaOpen: (val: boolean) => void;
-  isMercadoPagoModalOpen: boolean;
-  setIsMercadoPagoModalOpen: (val: boolean) => void;
   loginCustomer: (email: string, pass: string) => Promise<void>;
   registerCustomer: (email: string, pass: string, name: string, phone?: string) => Promise<void>;
   logoutCustomer: () => Promise<void>;
@@ -450,7 +448,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return saved ? JSON.parse(saved) : null;
   });
   const [isCustomerAreaOpen, setIsCustomerAreaOpen] = useState<boolean>(false);
-  const [isMercadoPagoModalOpen, setIsMercadoPagoModalOpen] = useState<boolean>(false);
   const [pendingWhatsAppPhone, setPendingWhatsAppPhone] = useState<string>(() => {
     return localStorage.getItem('jsp_pending_wa_phone') || '';
   });
@@ -1865,8 +1862,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         customerUser,
         isCustomerAreaOpen,
         setIsCustomerAreaOpen,
-        isMercadoPagoModalOpen,
-        setIsMercadoPagoModalOpen,
         loginCustomer,
         registerCustomer,
         logoutCustomer,

@@ -27,7 +27,6 @@ export type AdminTab =
   | 'midi_gospel'
   | 'flyer_show'
   | 'appearance'
-  | 'checkout'
   | 'firebase'
   | 'orders';
 
@@ -43,9 +42,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   const {
     setIsAdminMode,
     firebaseConfig,
-    checkoutConfig,
     exportConfigBackup,
-    adminCredentials,
     logoutAdmin,
     logoutAdminGoogle,
   } = useStore();
@@ -67,7 +64,6 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
     { id: 'midi_gospel' as AdminTab, label: 'Página MIDI Gospel', icon: Disc },
     { id: 'flyer_show' as AdminTab, label: 'Página Flyer Show', icon: Image },
     { id: 'appearance' as AdminTab, label: 'Personalização do Site', icon: Palette },
-    { id: 'checkout' as AdminTab, label: 'Checkout & Pagamento', icon: CreditCard },
     { id: 'firebase' as AdminTab, label: 'Integração Firebase', icon: Flame },
     { id: 'orders' as AdminTab, label: 'Vendas & Pedidos', icon: ShoppingBag },
   ];
@@ -86,12 +82,6 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
           </div>
 
           <div className="hidden md:flex items-center gap-2 pl-3 border-l border-white/10 text-neutral-400">
-            {/* PIX Status */}
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-[10px]">
-              <CheckCircle2 className="w-3 h-3" />
-              <span>PIX BRCode Ativo</span>
-            </span>
-
             {/* Firebase Status */}
             {firebaseConfig.isConnected && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/30 text-amber-400 text-[10px]">

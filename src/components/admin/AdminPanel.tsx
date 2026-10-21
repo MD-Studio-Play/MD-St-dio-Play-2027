@@ -5,7 +5,6 @@ import { AdminLoginModal } from './AdminLoginModal';
 import { DashboardTab } from './DashboardTab';
 import { MusicTab } from './MusicTab';
 import { AppearanceTab } from './AppearanceTab';
-import { CheckoutTab } from './CheckoutTab';
 import { FirebaseTab } from './FirebaseTab';
 import { OrdersTab } from './OrdersTab';
 import { FlyerShowTab } from './FlyerShowTab';
@@ -100,7 +99,6 @@ export const AdminPanel: React.FC = () => {
           {currentTab === 'midi_gospel' && <MidiGospelTab />}
           {currentTab === 'flyer_show' && <FlyerShowTab />}
           {currentTab === 'appearance' && <AppearanceTab />}
-          {currentTab === 'checkout' && <CheckoutTab />}
           {currentTab === 'firebase' && <FirebaseTab />}
           {currentTab === 'orders' && <OrdersTab />}
         </AdminErrorBoundary>
