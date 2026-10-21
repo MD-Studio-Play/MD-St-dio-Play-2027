@@ -10,6 +10,7 @@ import { OrdersTab } from './OrdersTab';
 import { FlyerShowTab } from './FlyerShowTab';
 import { MidiVariadosTab } from './MidiVariadosTab';
 import { MidiGospelTab } from './MidiGospelTab';
+import { CheckoutTab } from './CheckoutTab';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface AdminErrorBoundaryProps {
@@ -101,6 +102,7 @@ export const AdminPanel: React.FC = () => {
           {currentTab === 'appearance' && <AppearanceTab />}
           {currentTab === 'firebase' && <FirebaseTab />}
           {currentTab === 'orders' && <OrdersTab />}
+          {currentTab === 'checkout' && <CheckoutTab />}
         </AdminErrorBoundary>
       </main>
 

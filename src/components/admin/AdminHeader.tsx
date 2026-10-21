@@ -28,7 +28,8 @@ export type AdminTab =
   | 'flyer_show'
   | 'appearance'
   | 'firebase'
-  | 'orders';
+  | 'orders'
+  | 'checkout';
 
 interface AdminHeaderProps {
   currentTab: AdminTab;
@@ -66,6 +67,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
     { id: 'appearance' as AdminTab, label: 'Personalização do Site', icon: Palette },
     { id: 'firebase' as AdminTab, label: 'Integração Firebase', icon: Flame },
     { id: 'orders' as AdminTab, label: 'Vendas & Pedidos', icon: ShoppingBag },
+    { id: 'checkout' as AdminTab, label: 'Checkout & PIX (Mercado Pago)', icon: CreditCard },
   ];
 
   return (

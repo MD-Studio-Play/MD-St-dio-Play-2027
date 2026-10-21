@@ -23,6 +23,7 @@ import { CustomerAreaModal } from './components/CustomerAreaModal';
 import { ExtraCategoryView } from './components/ExtraCategoryView';
 import { FlyerShowPage } from './components/FlyerShowPage';
 import { MidiPageView } from './components/MidiPageView';
+import { PixCheckoutModal } from './components/PixCheckoutModal';
 import { SearchX, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -50,18 +51,22 @@ export default function App() {
   // Cart State
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const cartPackIds = useMemo(() => new Set(cartItems.map((i) => i.pack.id)), [cartItems]);
 
   // Drawers & Modals
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
 
-  // Handle direct navigation routes (/area-do-cliente)
+  // Handle direct navigation routes (/area-do-cliente, /checkout)
   useEffect(() => {
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     if (path.includes('/area-do-cliente') || hash.includes('area-do-cliente')) {
       setIsCustomerAreaOpen(true);
+      window.history.replaceState(null, '', '/');
+    } else if (path.includes('/checkout') || hash.includes('checkout')) {
+      setIsCheckoutOpen(true);
       window.history.replaceState(null, '', '/');
     }
   }, [setIsCustomerAreaOpen]);
@@ -420,6 +425,15 @@ export default function App() {
         items={cartItems}
         onRemoveItem={handleRemoveCartItem}
         onUpdateQuantity={handleUpdateQuantity}
+        onClearCart={handleClearCart}
+        onOpenCheckout={() => setIsCheckoutOpen(true)}
+      />
+
+      {/* Real-time PIX Checkout Modal (Official Mercado Pago) */}
+      <PixCheckoutModal
+        isOpen={isCheckoutOpen}
+        onClose={() => setIsCheckoutOpen(false)}
+        items={cartItems}
         onClearCart={handleClearCart}
       />
 

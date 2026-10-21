@@ -9,6 +9,8 @@ import {
   ShoppingBag,
   ArrowRight,
   Sparkles,
+  QrCode,
+  ShieldCheck,
 } from 'lucide-react';
 import { CartItem } from '../types';
 import { useStore } from '../context/StoreContext';
@@ -31,6 +33,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onUpdateQuantity,
   onClearCart,
+  onOpenCheckout,
 }) => {
   const { menuConfig, themeConfig } = useStore();
 
@@ -261,21 +264,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             )}
           </div>
 
-          {/* Footer CTA: Direct WhatsApp Order */}
+          {/* Footer CTA: Real-Time PIX Checkout */}
           {items.length > 0 && (
             <div className="p-4 border-t border-white/10 bg-[#12141a] space-y-2 shrink-0">
               <button
                 type="button"
-                onClick={handleOrderViaWhatsApp}
-                className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-black text-sm sm:text-base rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 active:scale-98 cursor-pointer"
+                onClick={() => {
+                  onClose();
+                  onOpenCheckout?.();
+                }}
+                className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-emerald-500/25 active:scale-98 cursor-pointer"
               >
-                <MessageCircle className="w-5 h-5 fill-white stroke-none" />
-                <span>Fazer Pedido via WhatsApp</span>
+                <QrCode className="w-5 h-5" />
+                <span>FINALIZAR COMPRA (PIX)</span>
                 <ArrowRight className="w-4 h-4 ml-1" />
               </button>
-              <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-400">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Atendimento direto e envio imediato dos arquivos</span>
+
+              <button
+                type="button"
+                onClick={handleOrderViaWhatsApp}
+                className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                <span>Ou pedir diretamente pelo WhatsApp</span>
+              </button>
+
+              <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-400 pt-0.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Pagamento instantâneo via PIX do Mercado Pago</span>
               </div>
             </div>
           )}
