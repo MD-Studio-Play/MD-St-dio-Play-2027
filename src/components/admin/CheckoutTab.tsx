@@ -57,12 +57,24 @@ export const CheckoutTab: React.FC = () => {
 
   const webhookUrl = 'https://mdstudioplay.com.br/api/mercadopago/webhook';
 
+  const safeParseResponse = async (res: Response) => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+        throw new Error('O servidor respondeu temporariamente com HTML. Por favor, aguarde alguns instantes e tente novamente.');
+      }
+      throw new Error(text || 'Resposta inválida do servidor.');
+    }
+  };
+
   const fetchStatus = async () => {
     setIsLoadingStatus(true);
     try {
       const res = await fetch('/api/mercadopago/status');
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeParseResponse(res);
         setGatewayStatus(data);
         setIsSandbox(Boolean(data.isSandbox));
       }
@@ -88,7 +100,7 @@ export const CheckoutTab: React.FC = () => {
           accessToken: accessToken.trim() || undefined,
         }),
       });
-      const data = await res.json();
+      const data = await safeParseResponse(res);
       if (res.ok && data.success) {
         setTestResult({
           success: true,
@@ -129,7 +141,7 @@ export const CheckoutTab: React.FC = () => {
         }),
       });
 
-      const data = await res.json();
+      const data = await safeParseResponse(res);
       if (res.ok && data.success) {
         setSaveSuccess(true);
         setAccessToken('');

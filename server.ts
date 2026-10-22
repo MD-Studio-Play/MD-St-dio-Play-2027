@@ -759,28 +759,27 @@ async function handleCreatePayment(req: Request, res: Response) {
     }
 
     if (!isCard) {
-      // ━━━ 1. OFFICIAL MERCADO PAGO ORDERS API (POST https://api.mercadopago.com/v1/orders) ━━━
-      const orderItems = validatedItems.map((item, idx) => ({
-        external_code: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
+      // ━━━ 1. PREFERENCE CLIENT API (POST https://api.mercadopago.com/checkout/preferences) ━━━
+      const isSellerEmail = email.toLowerCase().includes('moriartdigital@gmail.com');
+      const payerEmailForPreference = isSellerEmail ? 'cliente.comprador@gmail.com' : email;
+
+      const preferenceItems = validatedItems.map((item, idx) => ({
+        id: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
         title: String(item.title || 'Produto MD Studio').slice(0, 150),
         description: String(item.title || 'Playback e Multitrack').slice(0, 200),
+        picture_url: item.coverImage && item.coverImage.startsWith('https://') ? item.coverImage : undefined,
         category_id: 'music',
-        ...(item.coverImage && item.coverImage.startsWith('https://') ? { picture_url: item.coverImage } : {}),
         quantity: Math.max(1, Number(item.quantity) || 1),
-        unit_price: Number(item.unit_price).toFixed(2),
+        currency_id: 'BRL',
+        unit_price: Number(item.unit_price),
       }));
 
-      const mpOrdersPayload = {
-        type: 'online',
-        total_amount: finalTotal.toFixed(2),
-        external_reference: externalReference,
-        processing_mode: 'manual',
-        capture_mode: 'automatic_async',
-        expiration_time: 'P1D',
+      const preferencePayload = {
+        items: preferenceItems,
         payer: {
-          email,
-          first_name: firstName,
-          last_name: lastName,
+          name: firstName,
+          surname: lastName,
+          email: payerEmailForPreference,
           phone: {
             area_code: areaCode,
             number: phoneNumber,
@@ -790,49 +789,119 @@ async function handleCreatePayment(req: Request, res: Response) {
             number: cleanCpf,
           },
         },
-        config: {
-          statement_descriptor: 'MD STUDIO',
-          default_payment_due_date: 'P1D',
-          online: {
-            available_from: new Date().toISOString(),
-            allowed_user_type: 'account_only',
-            success_url: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
-            failure_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
-            pending_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
-            auto_return: 'approved',
-          },
+        back_urls: {
+          success: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
+          pending: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
+          failure: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
         },
-        items: orderItems,
-        description: description.slice(0, 100),
+        auto_return: 'approved',
+        binary_mode: true,
+        external_reference: externalReference,
+        statement_descriptor: 'MD STUDIO',
+        ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       };
 
       try {
-        const orderCallRes = await fetch('https://api.mercadopago.com/v1/orders', {
+        const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
             'X-Idempotency-Key': idempotencyKey,
           },
-          body: JSON.stringify(mpOrdersPayload),
+          body: JSON.stringify(preferencePayload),
         });
 
-        const orderCallData: any = await orderCallRes.json().catch(() => ({}));
-        if (orderCallRes.ok && (orderCallData.id || orderCallData.checkout_url)) {
-          mpRes = orderCallRes;
-          mpData = orderCallData;
-          isOrdersApi = true;
-          mpRequestId = orderCallRes.headers.get('x-request-id') || mpRequestId;
-          console.info(`[MERCADO PAGO ORDERS API SUCCESS]: OrderId: ${orderCallData.id}, CheckoutUrl: ${orderCallData.checkout_url}`);
+        const prefData: any = await prefRes.json().catch(() => ({}));
+        if (prefRes.ok && (prefData.id || prefData.init_point)) {
+          mpRes = prefRes;
+          mpData = prefData;
+          isOrdersApi = false;
+          mpRequestId = prefRes.headers.get('x-request-id') || mpRequestId;
+          console.info(`[MERCADO PAGO PREFERENCE SUCCESS]: PreferenceId: ${prefData.id}, InitPoint: ${prefData.init_point}`);
         } else {
-          console.warn(`[MERCADO PAGO ORDERS API NOTICE]: HTTP ${orderCallRes.status}, fallback to /v1/payments:`, orderCallData);
+          console.warn(`[MERCADO PAGO PREFERENCE NOTICE]: HTTP ${prefRes.status}, falling back to /v1/orders:`, prefData);
         }
-      } catch (orderErr: any) {
-        console.warn('[MERCADO PAGO ORDERS API ERROR]:', orderErr?.message);
+      } catch (prefErr: any) {
+        console.warn('[MERCADO PAGO PREFERENCE ERROR]:', prefErr?.message);
+      }
+
+      // ━━━ 2. ORDERS API FALLBACK (POST https://api.mercadopago.com/v1/orders) ━━━
+      if (!mpData || !mpRes?.ok) {
+        const orderItems = validatedItems.map((item, idx) => ({
+          external_code: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
+          title: String(item.title || 'Produto MD Studio').slice(0, 150),
+          description: String(item.title || 'Playback e Multitrack').slice(0, 200),
+          category_id: 'music',
+          ...(item.coverImage && item.coverImage.startsWith('https://') ? { picture_url: item.coverImage } : {}),
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          unit_price: Number(item.unit_price).toFixed(2),
+        }));
+
+        const mpOrdersPayload = {
+          type: 'online',
+          total_amount: finalTotal.toFixed(2),
+          external_reference: externalReference,
+          processing_mode: 'manual',
+          capture_mode: 'automatic_async',
+          expiration_time: 'P1D',
+          payer: {
+            email,
+            first_name: firstName,
+            last_name: lastName,
+            phone: {
+              area_code: areaCode,
+              number: phoneNumber,
+            },
+            identification: {
+              type: 'CPF',
+              number: cleanCpf,
+            },
+          },
+          config: {
+            statement_descriptor: 'MD STUDIO',
+            default_payment_due_date: 'P1D',
+            online: {
+              available_from: new Date().toISOString(),
+              allowed_user_type: 'account_only',
+              success_url: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
+              failure_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
+              pending_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
+              auto_return: 'approved',
+            },
+          },
+          items: orderItems,
+          description: description.slice(0, 100),
+        };
+
+        try {
+          const orderCallRes = await fetch('https://api.mercadopago.com/v1/orders', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+              'X-Idempotency-Key': idempotencyKey,
+            },
+            body: JSON.stringify(mpOrdersPayload),
+          });
+
+          const orderCallData: any = await orderCallRes.json().catch(() => ({}));
+          if (orderCallRes.ok && (orderCallData.id || orderCallData.checkout_url)) {
+            mpRes = orderCallRes;
+            mpData = orderCallData;
+            isOrdersApi = true;
+            mpRequestId = orderCallRes.headers.get('x-request-id') || mpRequestId;
+            console.info(`[MERCADO PAGO ORDERS API SUCCESS]: OrderId: ${orderCallData.id}, CheckoutUrl: ${orderCallData.checkout_url}`);
+          } else {
+            console.warn(`[MERCADO PAGO ORDERS API NOTICE]: HTTP ${orderCallRes.status}, fallback to /v1/payments:`, orderCallData);
+          }
+        } catch (orderErr: any) {
+          console.warn('[MERCADO PAGO ORDERS API ERROR]:', orderErr?.message);
+        }
       }
     }
 
-    // ━━━ 2. FALLBACK / STANDARD PAYMENTS API (POST https://api.mercadopago.com/v1/payments) ━━━
+    // ━━━ 3. STANDARD PAYMENTS API FALLBACK (POST https://api.mercadopago.com/v1/payments) ━━━
     if (!mpData || !mpRes?.ok) {
       if (!isCard) {
         paymentPayload = {
@@ -871,16 +940,18 @@ async function handleCreatePayment(req: Request, res: Response) {
       mpData = await mpRes.json().catch(() => ({}));
     }
 
-    if (mpRes?.ok && (mpData?.id || mpData?.checkout_url)) {
+    if (mpRes?.ok && (mpData?.id || mpData?.checkout_url || mpData?.init_point)) {
+      const isSandbox = accessToken.startsWith('TEST-');
+      const initPoint = isSandbox && mpData.sandbox_init_point ? mpData.sandbox_init_point : (mpData.init_point || mpData.checkout_url || '');
+      const checkoutUrl = String(initPoint || mpData.checkout_url || '');
       console.info(
-        `[MERCADO PAGO AUDIT SUCCESS] API: ${isOrdersApi ? 'POST /v1/orders' : 'POST /v1/payments'} | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | PaymentId: ${mpData.id} | Amount: R$ ${finalTotal.toFixed(2)}`
+        `[MERCADO PAGO AUDIT SUCCESS] API: ${mpData.init_point ? 'POST /checkout/preferences' : (isOrdersApi ? 'POST /v1/orders' : 'POST /v1/payments')} | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | PaymentId: ${mpData.id} | Amount: R$ ${finalTotal.toFixed(2)}`
       );
       const paymentId = String(mpData.id || orderId);
       const mpStatus = String(mpData.status || (isOrdersApi ? 'created' : 'pending'));
       const statusDetail = String(mpData.status_detail || 'accredited');
-      const checkoutUrl = String(mpData.checkout_url || '');
       const transactionData = mpData.point_of_interaction?.transaction_data;
-      const rawQrCode = transactionData?.qr_code || mpData.qr_data || (isOrdersApi ? checkoutUrl : '');
+      const rawQrCode = transactionData?.qr_code || mpData.qr_data || checkoutUrl;
       let qrCodeBase64 = transactionData?.qr_code_base64 || '';
       const ticketUrl = transactionData?.ticket_url || checkoutUrl || '';
 
@@ -961,6 +1032,8 @@ async function handleCreatePayment(req: Request, res: Response) {
         provider: 'mercadopago',
         orderId,
         paymentId,
+        id: paymentId,
+        init_point: checkoutUrl,
         checkout_url: checkoutUrl,
         checkoutUrl,
         externalReference,
@@ -2608,6 +2681,12 @@ async function startServer() {
 
     app.use('*', async (req: Request, res: Response, next) => {
       const url = req.originalUrl;
+      if (url.startsWith('/api') || req.path.startsWith('/api')) {
+        return res.status(404).json({
+          success: false,
+          error: `Endpoint da API não encontrado: ${req.method} ${url}`,
+        });
+      }
       try {
         let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
@@ -2619,6 +2698,12 @@ async function startServer() {
   } else {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req: Request, res: Response) => {
+      if (_req.originalUrl.startsWith('/api') || _req.path.startsWith('/api')) {
+        return res.status(404).json({
+          success: false,
+          error: `Endpoint da API não encontrado: ${_req.method} ${_req.originalUrl}`,
+        });
+      }
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   }
