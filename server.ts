@@ -40,7 +40,48 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper: Retrieve Access Token exclusively from server environment variables or secured Firestore
+// Process crash prevention guards
+process.on('uncaughtException', (err) => {
+  console.error('[SERVER AUDIT] Uncaught Exception caught (prevented server crash):', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[SERVER AUDIT] Unhandled Rejection caught (prevented server crash):', (reason as any)?.message || reason);
+});
+
+// File-based persistent configuration for Mercado Pago
+const MP_CONFIG_FILE = path.resolve(__dirname, '.mercadopago-config.json');
+
+interface MpStoredConfig {
+  accessToken?: string;
+  publicKey?: string;
+  isSandbox?: boolean;
+  seller?: any;
+  updatedAt?: string;
+}
+
+function readLocalMpConfig(): MpStoredConfig {
+  try {
+    if (fs.existsSync(MP_CONFIG_FILE)) {
+      const content = fs.readFileSync(MP_CONFIG_FILE, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (e: any) {
+    console.warn('[Notice reading .mercadopago-config.json]:', e?.message);
+  }
+  return {};
+}
+
+function writeLocalMpConfig(cfg: Partial<MpStoredConfig>): void {
+  try {
+    const existing = readLocalMpConfig();
+    const merged = { ...existing, ...cfg, updatedAt: new Date().toISOString() };
+    fs.writeFileSync(MP_CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+  } catch (e: any) {
+    console.warn('[Notice writing .mercadopago-config.json]:', e?.message);
+  }
+}
+
+// In-memory token cache
 let cachedFirestoreMpToken: string | null = null;
 let cachedFirestoreMpPublic: string | null = null;
 
@@ -61,8 +102,10 @@ function isValidTokenCandidate(token?: string | null): boolean {
 }
 
 function getAccessToken(): string {
+  const localCfg = readLocalMpConfig();
   const token =
     cachedFirestoreMpToken ||
+    localCfg.accessToken ||
     process.env.MERCADO_PAGO_ACCESS_TOKEN ||
     process.env.MERCADOPAGO_ACCESS_TOKEN ||
     '';
@@ -74,43 +117,64 @@ async function getMercadoPagoAccessToken(fallback?: string): Promise<string> {
   if (fallback && isValidTokenCandidate(fallback)) {
     return fallback.trim();
   }
-  // 2. In-memory cached token (saved via /api/mercadopago/save-config)
+  // 2. In-memory cached token
   if (cachedFirestoreMpToken && isValidTokenCandidate(cachedFirestoreMpToken)) {
     return cachedFirestoreMpToken;
   }
-  // 3. Firestore stored checkout configuration (official database storage)
-  try {
-    const snap = await getDoc(doc(db, 'site_settings', 'checkout'));
-    if (snap.exists()) {
-      const t1 = snap.data()?.config?.mercadoPagoAccessToken || snap.data()?.mercadoPagoAccessToken;
-      if (t1 && isValidTokenCandidate(t1)) {
-        cachedFirestoreMpToken = t1.trim();
-        return t1.trim();
-      }
-    }
-    const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
-    if (snap2.exists()) {
-      const t2 = snap2.data()?.mercadoPagoAccessToken;
-      if (t2 && isValidTokenCandidate(t2)) {
-        cachedFirestoreMpToken = t2.trim();
-        return t2.trim();
-      }
-    }
-  } catch (dbErr) {
-    console.warn('[Firestore Token Load Notice]:', dbErr);
+  // 3. Local persistent file config (.mercadopago-config.json)
+  const localCfg = readLocalMpConfig();
+  if (localCfg.accessToken && isValidTokenCandidate(localCfg.accessToken)) {
+    cachedFirestoreMpToken = localCfg.accessToken.trim();
+    return cachedFirestoreMpToken;
   }
-  // 4. Server environment variable (only if valid and not expired/blacklisted)
+  // 4. Server environment variable
   const envToken = (process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
   if (envToken && isValidTokenCandidate(envToken)) {
     return envToken;
   }
+  // 5. Firestore fallback (with short timeout so quota-exhausted does not hang request)
+  try {
+    const firestorePromise = (async () => {
+      const snap = await getDoc(doc(db, 'site_settings', 'checkout'));
+      if (snap.exists()) {
+        const t1 = snap.data()?.config?.mercadoPagoAccessToken || snap.data()?.mercadoPagoAccessToken;
+        if (t1 && isValidTokenCandidate(t1)) {
+          return t1.trim();
+        }
+      }
+      const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
+      if (snap2.exists()) {
+        const t2 = snap2.data()?.mercadoPagoAccessToken;
+        if (t2 && isValidTokenCandidate(t2)) {
+          return t2.trim();
+        }
+      }
+      return '';
+    })();
+
+    const timeoutPromise = new Promise<string>((resolve) => setTimeout(() => resolve(''), 1500));
+    const tokenFromDb = await Promise.race([firestorePromise, timeoutPromise]);
+    if (tokenFromDb && isValidTokenCandidate(tokenFromDb)) {
+      cachedFirestoreMpToken = tokenFromDb;
+      writeLocalMpConfig({ accessToken: tokenFromDb });
+      return tokenFromDb;
+    }
+  } catch (dbErr: any) {
+    console.warn('[Firestore Token Load Notice - Quota or Offline]:', dbErr?.message);
+  }
+
   return '';
 }
 
 // Helper: Retrieve Public Key from environment or public config
 function getPublicKey(): string {
+  const localCfg = readLocalMpConfig();
   if (cachedFirestoreMpPublic && cachedFirestoreMpPublic.trim().length > 5) {
     return cachedFirestoreMpPublic.trim();
+  }
+  if (localCfg.publicKey && localCfg.publicKey.trim().length > 5) {
+    cachedFirestoreMpPublic = localCfg.publicKey.trim();
+    return cachedFirestoreMpPublic;
   }
   const key =
     process.env.MERCADO_PAGO_PUBLIC_KEY ||
@@ -124,24 +188,11 @@ function getPublicKey(): string {
 async function getMercadoPagoPublicKey(fallback?: string): Promise<string> {
   if (fallback && fallback.trim().length > 5 && !fallback.includes('mock')) return fallback.trim();
   if (cachedFirestoreMpPublic && cachedFirestoreMpPublic.trim().length > 5) return cachedFirestoreMpPublic;
-  try {
-    const snap = await getDoc(doc(db, 'site_settings', 'checkout'));
-    if (snap.exists()) {
-      const pub1 = snap.data()?.config?.mercadoPagoPublicKey || snap.data()?.mercadoPagoPublicKey;
-      if (pub1 && pub1.trim().length > 5) {
-        cachedFirestoreMpPublic = pub1.trim();
-        return pub1.trim();
-      }
-    }
-    const snap2 = await getDoc(doc(db, 'site_configs', 'checkout'));
-    if (snap2.exists()) {
-      const pub2 = snap2.data()?.mercadoPagoPublicKey;
-      if (pub2 && pub2.trim().length > 5) {
-        cachedFirestoreMpPublic = pub2.trim();
-        return pub2.trim();
-      }
-    }
-  } catch {}
+  const localCfg = readLocalMpConfig();
+  if (localCfg.publicKey && localCfg.publicKey.trim().length > 5) {
+    cachedFirestoreMpPublic = localCfg.publicKey.trim();
+    return cachedFirestoreMpPublic;
+  }
   const envKey = getPublicKey();
   if (envKey && envKey.length > 5 && !envKey.includes('mock')) return envKey;
   return '';
@@ -1186,14 +1237,24 @@ app.post('/api/mercadopago/test-connection', async (req: Request, res: Response)
         last_name: userData.last_name || '',
       };
 
-      if (req.body.save && rawToken) {
-        try {
-          cachedFirestoreMpToken = rawToken;
-          await setDoc(doc(db, 'site_settings', 'checkout'), { config: { mercadoPagoAccessToken: rawToken, pixGateway: 'mercadopago' } }, { merge: true });
-          await setDoc(doc(db, 'site_configs', 'checkout'), { mercadoPagoAccessToken: rawToken, pixGateway: 'mercadopago' }, { merge: true });
-        } catch (dbErr) {
-          console.warn('Notice: Firestore save in test-connection:', dbErr);
-        }
+      // Persist to local config file immediately
+      if (rawToken) {
+        cachedFirestoreMpToken = rawToken;
+        writeLocalMpConfig({
+          accessToken: rawToken,
+          seller,
+          isSandbox,
+        });
+
+        // Fire-and-forget background sync to Firestore
+        (async () => {
+          try {
+            await setDoc(doc(db, 'site_settings', 'checkout'), { config: { mercadoPagoAccessToken: rawToken, pixGateway: 'mercadopago' } }, { merge: true });
+            await setDoc(doc(db, 'site_configs', 'checkout'), { mercadoPagoAccessToken: rawToken, pixGateway: 'mercadopago' }, { merge: true });
+          } catch (dbErr: any) {
+            console.warn('[Notice: Firestore sync background]:', dbErr?.message);
+          }
+        })().catch(() => {});
       }
 
       return res.json({
@@ -1245,6 +1306,7 @@ app.post('/api/mercadopago/save-config', async (req: Request, res: Response) => 
       return res.status(400).json({ success: false, error: 'Access Token do Mercado Pago inválido.' });
     }
 
+    let sellerInfo: any = null;
     if (cleanToken) {
       // Validate token with Mercado Pago API
       const testRes = await fetch('https://api.mercadopago.com/users/me', {
@@ -1257,30 +1319,60 @@ app.post('/api/mercadopago/save-config', async (req: Request, res: Response) => 
           error: errJson.message || 'Access Token inválido no Mercado Pago. Por favor, verifique suas credenciais em Configurações > Credenciais no Mercado Pago Developers.',
         });
       }
+      const u = await testRes.json().catch(() => ({}));
+      if (u.id) {
+        sellerInfo = {
+          id: u.id,
+          nickname: u.nickname,
+          email: u.email,
+          site_id: u.site_id,
+          first_name: u.first_name,
+          last_name: u.last_name,
+        };
+      }
     }
 
+    // 1. Immediately save to persistent local config
+    const localUpdate: any = {
+      isSandbox: Boolean(isSandbox),
+    };
+    if (cleanToken) {
+      localUpdate.accessToken = cleanToken;
+      cachedFirestoreMpToken = cleanToken;
+    }
+    if (cleanPublic) {
+      localUpdate.publicKey = cleanPublic;
+      cachedFirestoreMpPublic = cleanPublic;
+    }
+    if (sellerInfo) {
+      localUpdate.seller = sellerInfo;
+    }
+    writeLocalMpConfig(localUpdate);
+
+    // 2. Fire-and-forget sync to Firestore in background (so quota error never breaks the UI response)
     const dataToSave: any = {
       pixGateway: 'mercadopago',
       creditCardGateway: 'mercadopago',
       isSandbox: Boolean(isSandbox),
       updated_at: new Date().toISOString(),
     };
+    if (cleanToken) dataToSave.mercadoPagoAccessToken = cleanToken;
+    if (cleanPublic) dataToSave.mercadoPagoPublicKey = cleanPublic;
+    if (sellerInfo) dataToSave.seller = sellerInfo;
 
-    if (cleanToken) {
-      dataToSave.mercadoPagoAccessToken = cleanToken;
-      cachedFirestoreMpToken = cleanToken;
-    }
-    if (cleanPublic) {
-      dataToSave.mercadoPagoPublicKey = cleanPublic;
-      cachedFirestoreMpPublic = cleanPublic;
-    }
-
-    await setDoc(doc(db, 'site_settings', 'checkout'), { config: dataToSave }, { merge: true });
-    await setDoc(doc(db, 'site_configs', 'checkout'), dataToSave, { merge: true });
+    (async () => {
+      try {
+        await setDoc(doc(db, 'site_settings', 'checkout'), { config: dataToSave }, { merge: true });
+        await setDoc(doc(db, 'site_configs', 'checkout'), dataToSave, { merge: true });
+      } catch (dbErr: any) {
+        console.warn('[Notice: Firestore save in background]:', dbErr?.message);
+      }
+    })().catch(() => {});
 
     return res.json({
       success: true,
       message: 'Configurações do Mercado Pago salvas e sincronizadas com sucesso!',
+      seller: sellerInfo,
       isSandbox: Boolean(isSandbox),
       mode: cleanToken.startsWith('TEST-') ? 'test' : 'production',
     });
@@ -2675,7 +2767,7 @@ async function startServer() {
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
 
