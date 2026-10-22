@@ -589,20 +589,20 @@ async function handleCreatePayment(req: Request, res: Response) {
       });
     }
 
-    // 1. Validate mandatory Payer details
-    const payerName = (payer?.name || '').trim();
-    const cleanCpf = (payer?.cpf || payer?.taxId || '').replace(/\D/g, '');
-    const cleanPhone = (payer?.phone || payer?.cellphone || '').replace(/\D/g, '');
-    const email = (payer?.email || '').trim().toLowerCase();
+    // 1. Validate mandatory Payer details: name, cellphone, email and taxId (CPF)
+    const payerName = (payer?.name || req.body.name || '').trim();
+    const cleanCpf = (payer?.cpf || payer?.taxId || req.body.taxId || req.body.cpf || '').replace(/\D/g, '');
+    const cleanPhone = (payer?.phone || payer?.cellphone || req.body.cellphone || req.body.phone || '').replace(/\D/g, '');
+    const email = (payer?.email || req.body.email || '').trim().toLowerCase();
 
     if (!payerName || payerName.length < 3) {
-      return res.status(400).json({ success: false, error: 'Nome completo é obrigatório.' });
+      return res.status(400).json({ success: false, error: 'Nome completo (name) é obrigatório.' });
     }
     if (!cleanPhone || cleanPhone.length < 10) {
-      return res.status(400).json({ success: false, error: 'WhatsApp com DDD é obrigatório.' });
+      return res.status(400).json({ success: false, error: 'WhatsApp/Celular com DDD (cellphone) é obrigatório.' });
     }
     if (!email || !email.includes('@')) {
-      return res.status(400).json({ success: false, error: 'E-mail válido é obrigatório.' });
+      return res.status(400).json({ success: false, error: 'E-mail (email) válido é obrigatório.' });
     }
     if (email === 'moriartdigital@gmail.com') {
       return res.status(400).json({
@@ -610,7 +610,10 @@ async function handleCreatePayment(req: Request, res: Response) {
         error: 'O Mercado Pago não permite compras utilizando o mesmo e-mail da sua conta vendedora (moriartdigital@gmail.com). Para testar a geração do PIX, utilize qualquer outro e-mail diferente.',
       });
     }
-    if (cleanCpf && !isValidCPF(cleanCpf)) {
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      return res.status(400).json({ success: false, error: 'CPF do pagador (taxId) é obrigatório pelo Banco Central.' });
+    }
+    if (!isValidCPF(cleanCpf)) {
       return res.status(400).json({ success: false, error: 'Por favor, informe um CPF válido e existente.' });
     }
 
@@ -738,63 +741,154 @@ async function handleCreatePayment(req: Request, res: Response) {
         },
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       };
-    } else {
-      // ━━━ PIX EM TEMPO REAL ━━━
-      paymentPayload = {
-        transaction_amount: finalTotal,
-        description: description.slice(0, 100),
-        payment_method_id: 'pix',
+    }
+
+    let mpRes: any = null;
+    let mpData: any = null;
+    let mpRequestId = `req_${Date.now()}`;
+    let isOrdersApi = false;
+
+    // Detect base URL for return endpoints
+    let appBaseUrl = 'https://mdstudioplay.com.br';
+    const origin = (req.headers.origin || '').trim().replace(/\/$/, '');
+    const forwardedHost = String(req.headers['x-forwarded-host'] || '').trim().replace(/\/$/, '');
+    if (origin.startsWith('https://')) {
+      appBaseUrl = origin;
+    } else if (forwardedHost) {
+      appBaseUrl = `https://${forwardedHost}`;
+    }
+
+    if (!isCard) {
+      // ━━━ 1. OFFICIAL MERCADO PAGO ORDERS API (POST https://api.mercadopago.com/v1/orders) ━━━
+      const orderItems = validatedItems.map((item, idx) => ({
+        external_code: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
+        title: String(item.title || 'Produto MD Studio').slice(0, 150),
+        description: String(item.title || 'Playback e Multitrack').slice(0, 200),
+        category_id: 'music',
+        ...(item.coverImage && item.coverImage.startsWith('https://') ? { picture_url: item.coverImage } : {}),
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        unit_price: Number(item.unit_price).toFixed(2),
+      }));
+
+      const mpOrdersPayload = {
+        type: 'online',
+        total_amount: finalTotal.toFixed(2),
         external_reference: externalReference,
+        processing_mode: 'manual',
+        capture_mode: 'automatic_async',
+        expiration_time: 'P1D',
         payer: {
           email,
           first_name: firstName,
           last_name: lastName,
-          ...(cleanCpf && cleanCpf.length === 11 && isValidCPF(cleanCpf) ? {
-            identification: {
-              type: 'CPF',
-              number: cleanCpf,
-            },
-          } : {}),
           phone: {
             area_code: areaCode,
             number: phoneNumber,
           },
+          identification: {
+            type: 'CPF',
+            number: cleanCpf,
+          },
         },
-        ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+        config: {
+          statement_descriptor: 'MD STUDIO',
+          default_payment_due_date: 'P1D',
+          online: {
+            available_from: new Date().toISOString(),
+            allowed_user_type: 'account_only',
+            success_url: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
+            failure_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
+            pending_url: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
+            auto_return: 'approved',
+          },
+        },
+        items: orderItems,
+        description: description.slice(0, 100),
       };
+
+      try {
+        const orderCallRes = await fetch('https://api.mercadopago.com/v1/orders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: JSON.stringify(mpOrdersPayload),
+        });
+
+        const orderCallData: any = await orderCallRes.json().catch(() => ({}));
+        if (orderCallRes.ok && (orderCallData.id || orderCallData.checkout_url)) {
+          mpRes = orderCallRes;
+          mpData = orderCallData;
+          isOrdersApi = true;
+          mpRequestId = orderCallRes.headers.get('x-request-id') || mpRequestId;
+          console.info(`[MERCADO PAGO ORDERS API SUCCESS]: OrderId: ${orderCallData.id}, CheckoutUrl: ${orderCallData.checkout_url}`);
+        } else {
+          console.warn(`[MERCADO PAGO ORDERS API NOTICE]: HTTP ${orderCallRes.status}, fallback to /v1/payments:`, orderCallData);
+        }
+      } catch (orderErr: any) {
+        console.warn('[MERCADO PAGO ORDERS API ERROR]:', orderErr?.message);
+      }
     }
 
-    // Call official Mercado Pago /v1/payments
-    const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        'X-Idempotency-Key': idempotencyKey,
-      },
-      body: JSON.stringify(paymentPayload),
-    });
+    // ━━━ 2. FALLBACK / STANDARD PAYMENTS API (POST https://api.mercadopago.com/v1/payments) ━━━
+    if (!mpData || !mpRes?.ok) {
+      if (!isCard) {
+        paymentPayload = {
+          transaction_amount: finalTotal,
+          description: description.slice(0, 100),
+          payment_method_id: 'pix',
+          external_reference: externalReference,
+          payer: {
+            email,
+            first_name: firstName,
+            last_name: lastName,
+            identification: {
+              type: 'CPF',
+              number: cleanCpf,
+            },
+            phone: {
+              area_code: areaCode,
+              number: phoneNumber,
+            },
+          },
+          ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+        };
+      }
 
-    const mpRequestId = mpRes.headers.get('x-request-id') || mpRes.headers.get('traceparent') || `req_${Date.now()}`;
-    const mpData: any = await mpRes.json().catch(() => ({}));
+      mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          'X-Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(paymentPayload),
+      });
 
-    if (mpRes.ok && mpData.id) {
+      mpRequestId = mpRes.headers.get('x-request-id') || mpRes.headers.get('traceparent') || `req_${Date.now()}`;
+      mpData = await mpRes.json().catch(() => ({}));
+    }
+
+    if (mpRes?.ok && (mpData?.id || mpData?.checkout_url)) {
       console.info(
-        `[MERCADO PAGO AUDIT SUCCESS] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | PaymentId: ${mpData.id} | Amount: R$ ${finalTotal.toFixed(2)}`
+        `[MERCADO PAGO AUDIT SUCCESS] API: ${isOrdersApi ? 'POST /v1/orders' : 'POST /v1/payments'} | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | PaymentId: ${mpData.id} | Amount: R$ ${finalTotal.toFixed(2)}`
       );
-      const paymentId = String(mpData.id);
-      const mpStatus = String(mpData.status || 'pending');
-      const statusDetail = String(mpData.status_detail || '');
+      const paymentId = String(mpData.id || orderId);
+      const mpStatus = String(mpData.status || (isOrdersApi ? 'created' : 'pending'));
+      const statusDetail = String(mpData.status_detail || 'accredited');
+      const checkoutUrl = String(mpData.checkout_url || '');
       const transactionData = mpData.point_of_interaction?.transaction_data;
-      const qrCode = transactionData?.qr_code || '';
+      const rawQrCode = transactionData?.qr_code || mpData.qr_data || (isOrdersApi ? checkoutUrl : '');
       let qrCodeBase64 = transactionData?.qr_code_base64 || '';
-      const ticketUrl = transactionData?.ticket_url || '';
+      const ticketUrl = transactionData?.ticket_url || checkoutUrl || '';
 
       if (qrCodeBase64 && !qrCodeBase64.startsWith('data:')) {
         qrCodeBase64 = `data:image/png;base64,${qrCodeBase64}`;
-      } else if (!qrCodeBase64 && qrCode) {
+      } else if (!qrCodeBase64 && (rawQrCode || checkoutUrl)) {
         try {
-          qrCodeBase64 = await QRCode.toDataURL(qrCode, {
+          qrCodeBase64 = await QRCode.toDataURL(rawQrCode || checkoutUrl, {
             errorCorrectionLevel: 'M',
             margin: 2,
             width: 320,
@@ -827,7 +921,8 @@ async function handleCreatePayment(req: Request, res: Response) {
         order_status: orderStatus,
         status: simpleStatus,
         mercadoPagoPaymentId: paymentId,
-        pixPayload: qrCode || null,
+        checkout_url: checkoutUrl || ticketUrl || null,
+        pixPayload: rawQrCode || null,
         pixQrCodeUrl: qrCodeBase64 || null,
         ticketUrl: ticketUrl || null,
         cardBrand: isCard ? (mpData.payment_method_id || 'Cartão') : null,
@@ -849,7 +944,7 @@ async function handleCreatePayment(req: Request, res: Response) {
         amount: finalTotal,
         status: mpStatus,
         status_detail: statusDetail,
-        transaction_date: mpData.date_created || new Date().toISOString(),
+        transaction_date: mpData.date_created || mpData.created_date || new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -866,23 +961,25 @@ async function handleCreatePayment(req: Request, res: Response) {
         provider: 'mercadopago',
         orderId,
         paymentId,
+        checkout_url: checkoutUrl,
+        checkoutUrl,
         externalReference,
         status: mpStatus,
         statusDetail,
         orderStatus,
         totalAmount: finalTotal,
-        qrCode,
+        qrCode: rawQrCode,
         qrCodeBase64,
         ticketUrl,
-        expirationDate: mpData.date_of_expiration,
+        expirationDate: mpData.date_of_expiration || mpData.expiration_time,
         postSaleUrls,
       });
     } else {
-      const { message: friendlyError, errorCode, isTemporary } = translateMercadoPagoError(mpData, mpRes.status);
+      const { message: friendlyError, errorCode, isTemporary } = translateMercadoPagoError(mpData, mpRes?.status || 400);
       console.error(
-        `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/payments | HTTP Status: ${mpRes.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | Code: ${errorCode} | RawMessage: ${mpData?.message || 'N/A'} | Cause: ${JSON.stringify(mpData?.cause || [])}`
+        `[MERCADO PAGO AUDIT ERROR] Endpoint: POST /v1/orders and /v1/payments | HTTP Status: ${mpRes?.status} | OrderId: ${orderId} | ExtRef: ${externalReference} | RequestId: ${mpRequestId} | Code: ${errorCode} | RawMessage: ${mpData?.message || 'N/A'} | Cause: ${JSON.stringify(mpData?.cause || [])}`
       );
-      return res.status(mpRes.status || 400).json({
+      return res.status(mpRes?.status || 400).json({
         success: false,
         errorCode,
         error: friendlyError,

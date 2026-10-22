@@ -61,6 +61,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
   const [ticketUrl, setTicketUrl] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [finalTotal, setFinalTotal] = useState<number>(0);
   const [isCopied, setIsCopied] = useState(false);
   const [postSaleUrls, setPostSaleUrls] = useState<string[]>([]);
@@ -323,16 +324,28 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
           amount: Number(cartTotal.toFixed(2)),
           description: `MD Stúdio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
           idempotencyKey,
+          name: cleanName,
+          cellphone: cleanPhone,
+          phone: cleanPhone,
+          email: cleanEmail,
+          taxId: cleanCpf,
+          cpf: cleanCpf,
           mercadoPagoAccessToken: checkoutConfig?.mercadoPagoAccessToken || undefined,
           payer: {
             name: cleanName,
-            email: cleanEmail,
+            first_name: cleanName.split(' ')[0] || 'Cliente',
+            last_name: cleanName.split(' ').slice(1).join(' ') || 'VIP',
+            cellphone: cleanPhone,
             phone: cleanPhone,
+            email: cleanEmail,
+            taxId: cleanCpf,
             cpf: cleanCpf,
           },
-          items: items.map((i) => ({
+          items: items.map((i, idx) => ({
             id: i.pack.id,
+            external_code: i.pack.id || `ITEM-${idx + 1}`,
             title: i.pack.title,
+            description: i.pack.title,
             quantity: i.quantity,
             unit_price: i.pack.discountPrice,
             postSaleUrl: i.pack.postSaleUrl,
@@ -351,12 +364,13 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
         data = null;
       }
 
-      if (data && data.success && data.paymentId && data.qrCode) {
+      if (data && data.success && (data.paymentId || data.orderId) && (data.qrCode || data.checkout_url || data.checkoutUrl)) {
         setOrderId(data.orderId);
         setPaymentId(data.paymentId);
-        setQrCode(data.qrCode);
+        setQrCode(data.qrCode || data.checkout_url || data.checkoutUrl);
         setQrCodeBase64(data.qrCodeBase64 || null);
         setTicketUrl(data.ticketUrl || null);
+        setCheckoutUrl(data.checkout_url || data.checkoutUrl || null);
         setFinalTotal(data.totalAmount || cartTotal);
         setCountdown(600); // 10 minutes
         setViewState('pix_display');
@@ -693,6 +707,19 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                   </>
                 )}
               </button>
+
+              {/* Direct payment link button when checkout_url is available */}
+              {checkoutUrl && (
+                <a
+                  href={checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full max-w-lg mx-auto py-3 rounded-2xl bg-[#009ee3] hover:bg-[#008ecb] text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#009ee3]/20"
+                >
+                  <span>Abrir Pagamento no Mercado Pago</span>
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              )}
 
               {/* Real-Time Status Notification */}
               <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 max-w-lg mx-auto flex items-center justify-center gap-2.5 text-xs text-emerald-300">
