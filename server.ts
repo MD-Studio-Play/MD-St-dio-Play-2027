@@ -810,74 +810,146 @@ async function handleCreatePayment(req: Request, res: Response) {
     }
 
     if (!isCard) {
-      // ━━━ 1. PREFERENCE CLIENT API (POST https://api.mercadopago.com/checkout/preferences) ━━━
-      const isSellerEmail = email.toLowerCase().includes('moriartdigital@gmail.com');
-      const payerEmailForPreference = isSellerEmail ? 'cliente.comprador@gmail.com' : email;
-
-      const preferenceItems = validatedItems.map((item, idx) => ({
+      // ━━━ 1. PRIMARY: PAYMENT CLIENT API (POST https://api.mercadopago.com/v1/payments) ━━━
+      // Matches official Mercado Pago Java SDK: PaymentClient client = new PaymentClient(); client.create(createRequest, requestOptions);
+      const paymentItems = validatedItems.map((item, idx) => ({
         id: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
         title: String(item.title || 'Produto MD Studio').slice(0, 150),
         description: String(item.title || 'Playback e Multitrack').slice(0, 200),
         picture_url: item.coverImage && item.coverImage.startsWith('https://') ? item.coverImage : undefined,
         category_id: 'music',
         quantity: Math.max(1, Number(item.quantity) || 1),
-        currency_id: 'BRL',
-        unit_price: Number(item.unit_price),
+        unit_price: Number(Number(item.unit_price).toFixed(2)),
       }));
 
-      const preferencePayload = {
-        items: preferenceItems,
+      const paymentClientPayload = {
+        transaction_amount: Number(finalTotal.toFixed(2)),
+        description: description.slice(0, 100),
+        payment_method_id: 'pix',
+        external_reference: externalReference,
+        installments: 1,
+        binary_mode: false,
         payer: {
-          name: firstName,
-          surname: lastName,
-          email: payerEmailForPreference,
-          phone: {
-            area_code: areaCode,
-            number: phoneNumber,
-          },
+          entity_type: 'individual',
+          type: 'customer',
+          email,
+          first_name: firstName,
+          last_name: lastName,
           identification: {
             type: 'CPF',
             number: cleanCpf,
           },
+          phone: {
+            area_code: areaCode,
+            number: phoneNumber,
+          },
         },
-        back_urls: {
-          success: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
-          pending: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
-          failure: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
+        additional_info: {
+          items: paymentItems,
+          payer: {
+            first_name: firstName,
+            last_name: lastName,
+            phone: {
+              area_code: areaCode,
+              number: phoneNumber,
+            },
+          },
         },
-        auto_return: 'approved',
-        binary_mode: true,
-        external_reference: externalReference,
-        statement_descriptor: 'MD STUDIO',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       };
 
       try {
-        const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+        const payRes = await fetch('https://api.mercadopago.com/v1/payments', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
             'X-Idempotency-Key': idempotencyKey,
           },
-          body: JSON.stringify(preferencePayload),
+          body: JSON.stringify(paymentClientPayload),
         });
 
-        const prefData: any = await prefRes.json().catch(() => ({}));
-        if (prefRes.ok && (prefData.id || prefData.init_point)) {
-          mpRes = prefRes;
-          mpData = prefData;
-          isOrdersApi = false;
-          mpRequestId = prefRes.headers.get('x-request-id') || mpRequestId;
-          console.info(`[MERCADO PAGO PREFERENCE SUCCESS]: PreferenceId: ${prefData.id}, InitPoint: ${prefData.init_point}`);
+        const payData: any = await payRes.json().catch(() => ({}));
+        if (payRes.ok && (payData.id || payData.point_of_interaction?.transaction_data?.qr_code)) {
+          mpRes = payRes;
+          mpData = payData;
+          mpRequestId = payRes.headers.get('x-request-id') || mpRequestId;
+          console.info(`[MERCADO PAGO PAYMENT CLIENT SUCCESS]: PaymentId: ${payData.id}, Status: ${payData.status}`);
         } else {
-          console.warn(`[MERCADO PAGO PREFERENCE NOTICE]: HTTP ${prefRes.status}, falling back to /v1/orders:`, prefData);
+          console.warn(`[MERCADO PAGO PAYMENT CLIENT NOTICE]: HTTP ${payRes.status}, falling back to preferences:`, payData);
         }
-      } catch (prefErr: any) {
-        console.warn('[MERCADO PAGO PREFERENCE ERROR]:', prefErr?.message);
+      } catch (payErr: any) {
+        console.warn('[MERCADO PAGO PAYMENT CLIENT ERROR]:', payErr?.message);
       }
 
-      // ━━━ 2. ORDERS API FALLBACK (POST https://api.mercadopago.com/v1/orders) ━━━
+      // ━━━ 2. FALLBACK: PREFERENCE CLIENT API (POST https://api.mercadopago.com/checkout/preferences) ━━━
+      if (!mpData || !mpRes?.ok) {
+        const isSellerEmail = email.toLowerCase().includes('moriartdigital@gmail.com');
+        const payerEmailForPreference = isSellerEmail ? 'cliente.comprador@gmail.com' : email;
+
+        const preferenceItems = validatedItems.map((item, idx) => ({
+          id: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
+          title: String(item.title || 'Produto MD Studio').slice(0, 150),
+          description: String(item.title || 'Playback e Multitrack').slice(0, 200),
+          picture_url: item.coverImage && item.coverImage.startsWith('https://') ? item.coverImage : undefined,
+          category_id: 'music',
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          currency_id: 'BRL',
+          unit_price: Number(item.unit_price),
+        }));
+
+        const preferencePayload = {
+          items: preferenceItems,
+          payer: {
+            name: firstName,
+            surname: lastName,
+            email: payerEmailForPreference,
+            phone: {
+              area_code: areaCode,
+              number: phoneNumber,
+            },
+            identification: {
+              type: 'CPF',
+              number: cleanCpf,
+            },
+          },
+          back_urls: {
+            success: `${appBaseUrl}/area-do-cliente?order_id=${orderId}&status=approved`,
+            pending: `${appBaseUrl}/checkout?order_id=${orderId}&status=pending`,
+            failure: `${appBaseUrl}/checkout?order_id=${orderId}&status=failure`,
+          },
+          auto_return: 'approved',
+          binary_mode: true,
+          external_reference: externalReference,
+          statement_descriptor: 'MD STUDIO',
+          ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+        };
+
+        try {
+          const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+              'X-Idempotency-Key': idempotencyKey,
+            },
+            body: JSON.stringify(preferencePayload),
+          });
+
+          const prefData: any = await prefRes.json().catch(() => ({}));
+          if (prefRes.ok && (prefData.id || prefData.init_point)) {
+            mpRes = prefRes;
+            mpData = prefData;
+            isOrdersApi = false;
+            mpRequestId = prefRes.headers.get('x-request-id') || mpRequestId;
+            console.info(`[MERCADO PAGO PREFERENCE SUCCESS]: PreferenceId: ${prefData.id}, InitPoint: ${prefData.init_point}`);
+          }
+        } catch (prefErr: any) {
+          console.warn('[MERCADO PAGO PREFERENCE ERROR]:', prefErr?.message);
+        }
+      }
+
+      // ━━━ 3. FALLBACK: ORDERS API (POST https://api.mercadopago.com/v1/orders) ━━━
       if (!mpData || !mpRes?.ok) {
         const orderItems = validatedItems.map((item, idx) => ({
           external_code: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
@@ -942,41 +1014,14 @@ async function handleCreatePayment(req: Request, res: Response) {
             mpData = orderCallData;
             isOrdersApi = true;
             mpRequestId = orderCallRes.headers.get('x-request-id') || mpRequestId;
-            console.info(`[MERCADO PAGO ORDERS API SUCCESS]: OrderId: ${orderCallData.id}, CheckoutUrl: ${orderCallData.checkout_url}`);
-          } else {
-            console.warn(`[MERCADO PAGO ORDERS API NOTICE]: HTTP ${orderCallRes.status}, fallback to /v1/payments:`, orderCallData);
+            console.info(`[MERCADO PAGO ORDERS API SUCCESS]: OrderId: ${orderCallData.id}`);
           }
         } catch (orderErr: any) {
           console.warn('[MERCADO PAGO ORDERS API ERROR]:', orderErr?.message);
         }
       }
-    }
-
-    // ━━━ 3. STANDARD PAYMENTS API FALLBACK (POST https://api.mercadopago.com/v1/payments) ━━━
-    if (!mpData || !mpRes?.ok) {
-      if (!isCard) {
-        paymentPayload = {
-          transaction_amount: finalTotal,
-          description: description.slice(0, 100),
-          payment_method_id: 'pix',
-          external_reference: externalReference,
-          payer: {
-            email,
-            first_name: firstName,
-            last_name: lastName,
-            identification: {
-              type: 'CPF',
-              number: cleanCpf,
-            },
-            phone: {
-              area_code: areaCode,
-              number: phoneNumber,
-            },
-          },
-          ...(notificationUrl ? { notification_url: notificationUrl } : {}),
-        };
-      }
-
+    } else {
+      // ━━━ CARTÃO DE CRÉDITO API (POST https://api.mercadopago.com/v1/payments) ━━━
       mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
         method: 'POST',
         headers: {
