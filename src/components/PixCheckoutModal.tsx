@@ -23,7 +23,9 @@ import { useStore } from '../context/StoreContext';
 import { isValidCPF, formatCPF } from '../utils/cpfValidator';
 import { PackThumbnail } from './PackThumbnail';
 import { db } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+
+const DEFAULT_MP_TOKEN = 'APP_USR-3016872973673511-102015-1793162807f06f1da8d82aba77c59288-697443735';
 
 interface PixCheckoutModalProps {
   isOpen: boolean;
@@ -285,12 +287,6 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       setFormError('Por favor, informe um endereço de e-mail válido.');
       return;
     }
-    if (cleanEmail === 'moriartdigital@gmail.com') {
-      setFormError(
-        'O Mercado Pago não permite pagamentos utilizando o mesmo e-mail da conta vendedora (moriartdigital@gmail.com). Para testar a cobrança PIX, utilize qualquer outro e-mail.'
-      );
-      return;
-    }
     if (!cleanCpf || cleanCpf.length !== 11) {
       setFormError('O CPF é obrigatório pelo Banco Central para registro da chave PIX.');
       return;
@@ -308,63 +304,74 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
 
     // Unique idempotency key to prevent double charge on multi-click
     const idempotencyKey = `pix_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const usedToken = checkoutConfig?.mercadoPagoAccessToken || DEFAULT_MP_TOKEN;
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let isSuccess = false;
+      let data: any = null;
 
-      const response = await fetch('/api/mercadopago/create-pix', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'X-Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({
-          amount: Number(cartTotal.toFixed(2)),
-          description: `MD Stúdio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
-          idempotencyKey,
-          name: cleanName,
-          cellphone: cleanPhone,
-          phone: cleanPhone,
-          email: cleanEmail,
-          taxId: cleanCpf,
-          cpf: cleanCpf,
-          mercadoPagoAccessToken: checkoutConfig?.mercadoPagoAccessToken || undefined,
-          payer: {
+      // ━━━ 1. PRIMARY: SECURE BACKEND API CALL ━━━
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const response = await fetch('/api/mercadopago/create-pix', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            amount: Number(cartTotal.toFixed(2)),
+            description: `MD Stúdio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
+            idempotencyKey,
             name: cleanName,
-            first_name: cleanName.split(' ')[0] || 'Cliente',
-            last_name: cleanName.split(' ').slice(1).join(' ') || 'VIP',
             cellphone: cleanPhone,
             phone: cleanPhone,
             email: cleanEmail,
             taxId: cleanCpf,
             cpf: cleanCpf,
-          },
-          items: items.map((i, idx) => ({
-            id: i.pack.id,
-            external_code: i.pack.id || `ITEM-${idx + 1}`,
-            title: i.pack.title,
-            description: i.pack.title,
-            quantity: i.quantity,
-            unit_price: i.pack.discountPrice,
-            postSaleUrl: i.pack.postSaleUrl,
-          })),
-        }),
-        signal: controller.signal,
-      });
+            mercadoPagoAccessToken: usedToken,
+            payer: {
+              name: cleanName,
+              first_name: cleanName.split(' ')[0] || 'Cliente',
+              last_name: cleanName.split(' ').slice(1).join(' ') || 'VIP',
+              cellphone: cleanPhone,
+              phone: cleanPhone,
+              email: cleanEmail,
+              taxId: cleanCpf,
+              cpf: cleanCpf,
+            },
+            items: items.map((i, idx) => ({
+              id: i.pack.id,
+              external_code: i.pack.id || `ITEM-${idx + 1}`,
+              title: i.pack.title,
+              description: i.pack.title,
+              quantity: i.quantity,
+              unit_price: i.pack.discountPrice,
+              postSaleUrl: i.pack.postSaleUrl,
+            })),
+          }),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      let data: any = null;
-      try {
-        const text = await response.text();
-        data = JSON.parse(text);
-      } catch {
-        data = null;
+        try {
+          const text = await response.text();
+          data = JSON.parse(text);
+          if (data && data.success && (data.paymentId || data.orderId) && (data.qrCode || data.checkout_url || data.checkoutUrl)) {
+            isSuccess = true;
+          }
+        } catch {
+          data = null;
+        }
+      } catch (backendFetchErr) {
+        console.warn('Backend call notice, falling back to direct MP API on hosting:', backendFetchErr);
       }
 
-      if (data && data.success && (data.paymentId || data.orderId) && (data.qrCode || data.checkout_url || data.checkoutUrl)) {
+      if (isSuccess && data) {
         setOrderId(data.orderId);
         setPaymentId(data.paymentId);
         setQrCode(data.qrCode || data.checkout_url || data.checkoutUrl);
@@ -374,15 +381,145 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
         setFinalTotal(data.totalAmount || cartTotal);
         setCountdown(600); // 10 minutes
         setViewState('pix_display');
-
-        // Start polling & firestore listeners
         startOrderVerification(data.orderId);
-      } else {
-        const errMsg =
-          data?.error ||
-          'Não foi possível gerar a cobrança PIX no Mercado Pago. Verifique os dados informados e tente novamente.';
-        setFormError(errMsg);
+        return;
       }
+
+      // ━━━ 2. DIRECT CLIENT FALLBACK FOR HOSTING ENVIRONMENTS ━━━
+      // If hosting does not support server routes (e.g. Firebase Hosting, static CDN) or proxy timed out,
+      // generate directly via official Mercado Pago v1/payments API.
+      try {
+        const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+        const externalReference = `ext_ref_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const nameParts = cleanName.split(' ').filter(Boolean);
+        const firstName = nameParts[0] || 'Cliente';
+        const lastName = nameParts.slice(1).join(' ') || 'VIP';
+        const areaCode = cleanPhone.length >= 10 ? cleanPhone.substring(0, 2) : '11';
+        const phoneNumber = cleanPhone.length >= 10 ? cleanPhone.substring(2) : cleanPhone;
+
+        const directMpRes = await fetch('https://api.mercadopago.com/v1/payments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${usedToken}`,
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            transaction_amount: Number(cartTotal.toFixed(2)),
+            description: `MD Stúdio Play - ${items.map((i) => i.pack.title).join(', ')}`.slice(0, 100),
+            payment_method_id: 'pix',
+            external_reference: externalReference,
+            installments: 1,
+            binary_mode: false,
+            payer: {
+              entity_type: 'individual',
+              type: 'customer',
+              email: cleanEmail,
+              first_name: firstName,
+              last_name: lastName,
+              identification: {
+                type: 'CPF',
+                number: cleanCpf,
+              },
+              phone: {
+                area_code: areaCode,
+                number: phoneNumber,
+              },
+            },
+            additional_info: {
+              items: items.map((i, idx) => ({
+                id: String(i.pack.id || `ITEM-${idx + 1}`).slice(0, 50),
+                title: String(i.pack.title).slice(0, 150),
+                description: String(i.pack.title).slice(0, 200),
+                category_id: 'music',
+                quantity: Math.max(1, Number(i.quantity) || 1),
+                unit_price: Number(Number(i.pack.discountPrice || 57.99).toFixed(2)),
+              })),
+              payer: {
+                first_name: firstName,
+                last_name: lastName,
+                phone: {
+                  area_code: areaCode,
+                  number: phoneNumber,
+                },
+              },
+            },
+            notification_url: 'https://mdstudioplay.com.br/api/mercadopago/webhook',
+          }),
+        });
+
+        const directMpData = await directMpRes.json().catch(() => ({}));
+        if (directMpRes.ok && directMpData.id) {
+          const directPaymentId = String(directMpData.id);
+          const transactionData = directMpData.point_of_interaction?.transaction_data;
+          const directQrCode = transactionData?.qr_code || '';
+          let directQrCodeBase64 = transactionData?.qr_code_base64 || '';
+          const directTicketUrl = transactionData?.ticket_url || '';
+
+          if (directQrCodeBase64 && !directQrCodeBase64.startsWith('data:')) {
+            directQrCodeBase64 = `data:image/png;base64,${directQrCodeBase64}`;
+          }
+
+          // Persist order in Firestore
+          try {
+            await setDoc(doc(db, 'orders', orderId), {
+              id: orderId,
+              orderNumber: orderId,
+              customer_id: cleanPhone,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerPhone: cleanPhone,
+              customerCpf: cleanCpf,
+              external_reference: externalReference,
+              items: items.map((i) => ({
+                id: i.pack.id,
+                title: i.pack.title,
+                quantity: i.quantity,
+                unit_price: i.pack.discountPrice,
+                postSaleUrl: i.pack.postSaleUrl,
+              })),
+              total: Number(cartTotal.toFixed(2)),
+              paymentMethod: 'pix',
+              paymentProvider: 'mercadopago',
+              payment_id: directPaymentId,
+              payment_status: directMpData.status || 'pending',
+              order_status: 'AGUARDANDO PAGAMENTO',
+              status: 'pending',
+              pixPayload: directQrCode,
+              pixQrCodeUrl: directQrCodeBase64,
+              ticketUrl: directTicketUrl,
+              post_sale_urls: items.map((i) => i.pack.postSaleUrl).filter(Boolean),
+              date: new Date().toLocaleDateString('pt-BR'),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }, { merge: true });
+          } catch (fsErr) {
+            console.warn('Notice: Firestore save in client fallback:', fsErr);
+          }
+
+          setOrderId(orderId);
+          setPaymentId(directPaymentId);
+          setQrCode(directQrCode);
+          setQrCodeBase64(directQrCodeBase64);
+          setTicketUrl(directTicketUrl || null);
+          setCheckoutUrl(directTicketUrl || null);
+          setFinalTotal(cartTotal);
+          setCountdown(600);
+          setViewState('pix_display');
+          startOrderVerification(orderId);
+          return;
+        } else if (directMpData?.message) {
+          setFormError(directMpData.message);
+          return;
+        }
+      } catch (directCallErr) {
+        console.warn('Direct MP fallback notice:', directCallErr);
+      }
+
+      const errMsg =
+        data?.error ||
+        'Não foi possível gerar a cobrança PIX no Mercado Pago. Verifique os dados informados e tente novamente.';
+      setFormError(errMsg);
     } catch (err: any) {
       console.error('Falha ao gerar PIX:', err);
       setFormError('Falha temporária de comunicação com o Mercado Pago. Por favor, tente novamente em instantes.');

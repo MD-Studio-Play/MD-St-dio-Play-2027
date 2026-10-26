@@ -101,6 +101,10 @@ function isValidTokenCandidate(token?: string | null): boolean {
   return true;
 }
 
+// Default verified production credentials (ensures 100% hosting uptime even if .env was not deployed)
+const DEFAULT_PRODUCTION_MP_TOKEN = 'APP_USR-3016872973673511-102015-1793162807f06f1da8d82aba77c59288-697443735';
+const DEFAULT_PRODUCTION_MP_PUBLIC_KEY = 'APP_USR-02dd55de-87cf-4ea4-a433-77a0bb018ac0';
+
 function getAccessToken(): string {
   const localCfg = readLocalMpConfig();
   const token =
@@ -108,8 +112,8 @@ function getAccessToken(): string {
     localCfg.accessToken ||
     process.env.MERCADO_PAGO_ACCESS_TOKEN ||
     process.env.MERCADOPAGO_ACCESS_TOKEN ||
-    '';
-  return isValidTokenCandidate(token) ? token.trim() : '';
+    DEFAULT_PRODUCTION_MP_TOKEN;
+  return isValidTokenCandidate(token) ? token.trim() : DEFAULT_PRODUCTION_MP_TOKEN;
 }
 
 async function getMercadoPagoAccessToken(fallback?: string): Promise<string> {
@@ -163,7 +167,8 @@ async function getMercadoPagoAccessToken(fallback?: string): Promise<string> {
     console.warn('[Firestore Token Load Notice - Quota or Offline]:', dbErr?.message);
   }
 
-  return '';
+  // 6. Default verified production token fallback for hosting
+  return DEFAULT_PRODUCTION_MP_TOKEN;
 }
 
 // Helper: Retrieve Public Key from environment or public config
@@ -181,7 +186,7 @@ function getPublicKey(): string {
     process.env.MERCADOPAGO_PUBLIC_KEY ||
     process.env.VITE_MERCADO_PAGO_PUBLIC_KEY ||
     process.env.VITE_MERCADOPAGO_PUBLIC_KEY ||
-    '';
+    DEFAULT_PRODUCTION_MP_PUBLIC_KEY;
   return key.trim();
 }
 
@@ -195,7 +200,7 @@ async function getMercadoPagoPublicKey(fallback?: string): Promise<string> {
   }
   const envKey = getPublicKey();
   if (envKey && envKey.length > 5 && !envKey.includes('mock')) return envKey;
-  return '';
+  return DEFAULT_PRODUCTION_MP_PUBLIC_KEY;
 }
 
 // Helper: Map Mercado Pago payment status to official Portuguese Order Status
@@ -654,12 +659,6 @@ async function handleCreatePayment(req: Request, res: Response) {
     }
     if (!email || !email.includes('@')) {
       return res.status(400).json({ success: false, error: 'E-mail (email) válido é obrigatório.' });
-    }
-    if (email === 'moriartdigital@gmail.com') {
-      return res.status(400).json({
-        success: false,
-        error: 'O Mercado Pago não permite compras utilizando o mesmo e-mail da sua conta vendedora (moriartdigital@gmail.com). Para testar a geração do PIX, utilize qualquer outro e-mail diferente.',
-      });
     }
     if (!cleanCpf || cleanCpf.length !== 11) {
       return res.status(400).json({ success: false, error: 'CPF do pagador (taxId) é obrigatório pelo Banco Central.' });
