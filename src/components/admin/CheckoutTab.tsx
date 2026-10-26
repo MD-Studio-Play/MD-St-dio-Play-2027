@@ -55,7 +55,9 @@ export const CheckoutTab: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
 
-  const webhookUrl = 'https://mdstudioplay.com.br/api/mercadopago/webhook';
+  const webhookUrl = typeof window !== 'undefined' && window.location.origin
+    ? `${window.location.origin}/api/mercadopago/webhook`
+    : 'https://mdstudioplay.ai.studio/api/mercadopago/webhook';
 
   const safeParseResponse = async (res: Response, retryFn?: () => Promise<any>): Promise<any> => {
     const text = await res.text();

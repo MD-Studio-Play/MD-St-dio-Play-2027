@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search, ShoppingCart, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { InstallAppButton } from './InstallAppButton';
 
 export type TopMenuTab = 'playbacks' | 'midi_variados' | 'midi_gospel' | 'flyer_show';
 
@@ -165,8 +166,11 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* RIGHT: Área do Cliente & Green Cart Button */}
+          {/* RIGHT: Install App, Área do Cliente & Green Cart Button */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Install App / Web Shortcut Button (.lnk / PWA) */}
+            <InstallAppButton />
+
             {/* Button Área do Cliente (Black pill with white border and green user icon) */}
             <button
               type="button"

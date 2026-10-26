@@ -1,0 +1,49 @@
+{
+  "id": "https://mdstudioplay.ai.studio/",
+  "name": "MD Stúdio Play - Playbacks & Ritmos",
+  "short_name": "MD Stúdio",
+  "description": "Plataforma oficial de playbacks profissionais, multitracks e ritmos para tecladistas e músicos.",
+  "start_url": "https://mdstudioplay.ai.studio/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
+  "categories": ["music", "entertainment", "utilities"],
+  "icons": [
+    {
+      "src": "/md_studio_logo.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/md_studio_logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/md_studio_logo.jpg",
+      "sizes": "180x180",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Catálogo de Playbacks",
+      "short_name": "Playbacks",
+      "description": "Acessar todos os pacotes de playbacks",
+      "url": "https://mdstudioplay.ai.studio/?tab=playbacks",
+      "icons": [{ "src": "/md_studio_logo.jpg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Área do Cliente",
+      "short_name": "Meus Pedidos",
+      "description": "Ver meus downloads e pedidos liberados",
+      "url": "https://mdstudioplay.ai.studio/?area=cliente",
+      "icons": [{ "src": "/md_studio_logo.jpg", "sizes": "192x192" }]
+    }
+  ]
+}

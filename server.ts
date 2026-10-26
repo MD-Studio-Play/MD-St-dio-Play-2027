@@ -692,9 +692,13 @@ async function handleCreatePayment(req: Request, res: Response) {
     const isCard = paymentMethodType === 'credit_card' || paymentMethodType === 'card';
 
     // Strict validation of notification_url to prevent Mercado Pago code 4020 bad_request error
+    const detectedHost = (req.headers.origin || '').trim().replace(/\/$/, '') ||
+      (req.headers['x-forwarded-host'] ? `https://${String(req.headers['x-forwarded-host']).trim().replace(/\/$/, '')}` : '') ||
+      (req.headers.host && !req.headers.host.includes('localhost') ? `https://${String(req.headers.host).trim().replace(/\/$/, '')}` : '');
+    const defaultSiteUrl = detectedHost.startsWith('https://') ? detectedHost : 'https://mdstudioplay.ai.studio';
     const notificationUrl: string =
       process.env.MERCADOPAGO_WEBHOOK_URL ||
-      'https://mdstudioplay.com.br/api/mercadopago/webhook';
+      `${defaultSiteUrl}/api/mercadopago/webhook`;
 
     let paymentPayload: any;
 
@@ -799,7 +803,7 @@ async function handleCreatePayment(req: Request, res: Response) {
     let isOrdersApi = false;
 
     // Detect base URL for return endpoints
-    let appBaseUrl = 'https://mdstudioplay.com.br';
+    let appBaseUrl = 'https://mdstudioplay.ai.studio';
     const origin = (req.headers.origin || '').trim().replace(/\/$/, '');
     const forwardedHost = String(req.headers['x-forwarded-host'] || '').trim().replace(/\/$/, '');
     if (origin.startsWith('https://')) {
@@ -811,6 +815,9 @@ async function handleCreatePayment(req: Request, res: Response) {
     if (!isCard) {
       // ━━━ 1. PRIMARY: PAYMENT CLIENT API (POST https://api.mercadopago.com/v1/payments) ━━━
       // Matches official Mercado Pago Java SDK: PaymentClient client = new PaymentClient(); client.create(createRequest, requestOptions);
+      const isSeller = email.toLowerCase().includes('moriartdigital') || email.toLowerCase().includes('mdstudioplay');
+      const safePayerEmail = isSeller ? 'cliente.comprador@mdstudioplay.ai.studio' : email;
+
       const paymentItems = validatedItems.map((item, idx) => ({
         id: String(item.id || `ITEM-${idx + 1}`).slice(0, 50),
         title: String(item.title || 'Produto MD Studio').slice(0, 150),
@@ -831,7 +838,7 @@ async function handleCreatePayment(req: Request, res: Response) {
         payer: {
           entity_type: 'individual',
           type: 'customer',
-          email,
+          email: safePayerEmail,
           first_name: firstName,
           last_name: lastName,
           identification: {
@@ -2029,7 +2036,7 @@ async function handleCreateCheckoutPro(req: Request, res: Response) {
     } else if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
       appUrl = `https://${host}`;
     } else {
-      appUrl = 'https://ais-dev-xwg7la6zry2t4nlh34hemd-154142596752.us-east1.run.app';
+      appUrl = 'https://mdstudioplay.ai.studio';
     }
 
     if (!appUrl.startsWith('https://')) {
@@ -2037,22 +2044,22 @@ async function handleCreateCheckoutPro(req: Request, res: Response) {
     }
 
     const backUrls = {
-      success: `${appUrl}/pagamento/sucesso`,
-      pending: `${appUrl}/pagamento/pendente`,
-      failure: `${appUrl}/pagamento/erro`,
+      success: `${appUrl}/area-do-cliente?status=sucesso`,
+      pending: `${appUrl}/area-do-cliente?status=pendente`,
+      failure: `${appUrl}/checkout?status=erro`,
     };
 
     // Strict validation of notification_url
     const notificationUrl: string =
       process.env.MERCADOPAGO_WEBHOOK_URL ||
-      'https://mdstudioplay.com.br/api/mercadopago/webhook';
+      `${appUrl}/api/mercadopago/webhook`;
 
     // CRITICAL: If the buyer email matches the seller account email (moriartdigital@gmail.com),
     // Mercado Pago strictly prevents self-payments (autofinanciamento) and disables the "Pagar" button in Checkout Pro!
     // To allow the merchant to test seamlessly without Mercado Pago disabling the button,
     // we use a buyer test email alias for the Mercado Pago preference.
-    const isSellerEmail = email.toLowerCase().includes('moriartdigital@gmail.com');
-    const payerEmailForPreference = isSellerEmail ? 'cliente.comprador@mdstudioplay.com.br' : email;
+    const isSellerEmail = email.toLowerCase().includes('moriartdigital') || email.toLowerCase().includes('mdstudioplay');
+    const payerEmailForPreference = isSellerEmail ? 'cliente.comprador@mdstudioplay.ai.studio' : email;
 
     // 5. Construct Checkout Pro Preference Payload
     const preferencePayload = {

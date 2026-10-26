@@ -5,15 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MD Stúdio - Playbacks Profissionais, Multitracks & Ritmos</title>
     <meta name="description" content="MD Stúdio - Plataforma oficial de playbacks profissionais, multitracks e ritmos de Forró, Piseiro, Sertanejo, Arrocha e Pagode." />
+    <link rel="canonical" href="https://mdstudioplay.ai.studio/" />
+    <meta property="og:url" content="https://mdstudioplay.ai.studio/" />
     <meta property="og:title" content="MD Stúdio - Playbacks Profissionais, Multitracks & Ritmos" />
     <meta property="og:description" content="MD Stúdio - Plataforma oficial de playbacks profissionais, multitracks e ritmos de Forró, Piseiro, Sertanejo, Arrocha e Pagode." />
     <meta property="og:image" content="/md_studio_logo.jpg" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MD Stúdio - Playbacks Profissionais, Multitracks & Ritmos" />
+    <meta name="twitter:description" content="Plataforma oficial de playbacks profissionais, multitracks e ritmos para tecladistas e músicos." />
+    <meta name="twitter:image" content="/md_studio_logo.jpg" />
+    <meta name="theme-color" content="#0b0c0e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MD Stúdio" />
     <link rel="icon" type="image/jpeg" href="/md_studio_logo.jpg" />
+    <link rel="apple-touch-icon" href="/md_studio_logo.jpg" />
+    <link rel="manifest" href="/manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function() {});
+        });
+      }
+    </script>
   </head>
   <body class="bg-[#0b0c0e] text-[#e1e3e7] min-h-screen antialiased selection:bg-emerald-500 selection:text-black" style="background-color: #0b0c0e; color: #e1e3e7; margin: 0; min-height: 100vh;">
     <div id="root"></div>
