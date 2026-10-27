@@ -34,6 +34,79 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="w-full bg-[#1b1c20] border-b border-white/[0.08] sticky top-0 z-40 shadow-lg">
       <div className="max-w-[1440px] mx-auto px-3 sm:px-5 py-2 sm:py-2.5">
+        {/* MOBILE & TABLET TOP ROW: PlayBacks, MIDI Variados, MIDI Gospel, Flyer Show */}
+        {/* Exibido estritamente em extensões de tablet e mobile (< lg), posicionado ACIMA da barra de busca e da Área do Cliente */}
+        <div className="block lg:hidden mb-2 sm:mb-2.5 pb-1.5 sm:pb-2 border-b border-white/[0.08]">
+          <nav
+            aria-label="Navegação mobile e tablet"
+            className="flex items-center justify-between sm:justify-center gap-3 sm:gap-6 md:gap-8 overflow-x-auto no-scrollbar scroll-smooth px-1 py-0.5"
+          >
+            {/* 1. PlayBacks */}
+            <button
+              type="button"
+              onClick={() => handleTabClick('playbacks')}
+              className={`text-[13px] sm:text-sm md:text-base font-extrabold transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 whitespace-nowrap ${
+                activeTab === 'playbacks'
+                  ? 'text-[#f59e0b]'
+                  : 'text-white hover:text-[#f59e0b]'
+              }`}
+            >
+              <span>PlayBacks</span>
+              {activeTab === 'playbacks' && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
+              )}
+            </button>
+
+            {/* 2. MIDI Variados */}
+            <button
+              type="button"
+              onClick={() => handleTabClick('midi_variados')}
+              className={`text-[13px] sm:text-sm md:text-base font-extrabold transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 whitespace-nowrap ${
+                activeTab === 'midi_variados'
+                  ? 'text-[#f59e0b]'
+                  : 'text-white hover:text-[#f59e0b]'
+              }`}
+            >
+              <span>MIDI Variados</span>
+              {activeTab === 'midi_variados' && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
+              )}
+            </button>
+
+            {/* 3. MIDI Gospel */}
+            <button
+              type="button"
+              onClick={() => handleTabClick('midi_gospel')}
+              className={`text-[13px] sm:text-sm md:text-base font-extrabold transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 whitespace-nowrap ${
+                activeTab === 'midi_gospel'
+                  ? 'text-[#f59e0b]'
+                  : 'text-white hover:text-[#f59e0b]'
+              }`}
+            >
+              <span>MIDI Gospel</span>
+              {activeTab === 'midi_gospel' && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
+              )}
+            </button>
+
+            {/* 4. Flyer Show */}
+            <button
+              type="button"
+              onClick={() => handleTabClick('flyer_show')}
+              className={`text-[13px] sm:text-sm md:text-base font-extrabold transition-all cursor-pointer relative pb-1 tracking-tight shrink-0 whitespace-nowrap ${
+                activeTab === 'flyer_show'
+                  ? 'text-[#f59e0b]'
+                  : 'text-white hover:text-[#f59e0b]'
+              }`}
+            >
+              <span>Flyer Show</span>
+              {activeTab === 'flyer_show' && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-white rounded-full" />
+              )}
+            </button>
+          </nav>
+        </div>
+
         <div className="flex items-center justify-between gap-3 md:gap-5">
           {/* LEFT: Official MD STÚDIO Logo (Desktop only: excluded on mobile and tablet) */}
           <div className="hidden lg:flex items-center gap-2 sm:gap-2.5 shrink-0">
