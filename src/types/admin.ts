@@ -87,6 +87,7 @@ export interface CheckoutConfig {
   creditCardSecretToken: string;
   mercadoPagoAccessToken?: string;
   mercadoPagoPublicKey?: string;
+  mercadoPagoWebhookUrl?: string;
   creditCardMaxInstallments: number;
   creditCardInstallmentsFree: number;
   creditCardInterestRate: number;

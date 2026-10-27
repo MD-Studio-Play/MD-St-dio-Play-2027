@@ -692,13 +692,9 @@ async function handleCreatePayment(req: Request, res: Response) {
     const isCard = paymentMethodType === 'credit_card' || paymentMethodType === 'card';
 
     // Strict validation of notification_url to prevent Mercado Pago code 4020 bad_request error
-    const detectedHost = (req.headers.origin || '').trim().replace(/\/$/, '') ||
-      (req.headers['x-forwarded-host'] ? `https://${String(req.headers['x-forwarded-host']).trim().replace(/\/$/, '')}` : '') ||
-      (req.headers.host && !req.headers.host.includes('localhost') ? `https://${String(req.headers.host).trim().replace(/\/$/, '')}` : '');
-    const defaultSiteUrl = detectedHost.startsWith('https://') ? detectedHost : 'https://mdstudioplay.ai.studio';
     const notificationUrl: string =
       process.env.MERCADOPAGO_WEBHOOK_URL ||
-      `${defaultSiteUrl}/api/mercadopago/webhook`;
+      'https://mdstudioplay.netlify.app/api/mercadopago/webhook';
 
     let paymentPayload: any;
 
@@ -2052,7 +2048,7 @@ async function handleCreateCheckoutPro(req: Request, res: Response) {
     // Strict validation of notification_url
     const notificationUrl: string =
       process.env.MERCADOPAGO_WEBHOOK_URL ||
-      `${appUrl}/api/mercadopago/webhook`;
+      'https://mdstudioplay.netlify.app/api/mercadopago/webhook';
 
     // CRITICAL: If the buyer email matches the seller account email (moriartdigital@gmail.com),
     // Mercado Pago strictly prevents self-payments (autofinanciamento) and disables the "Pagar" button in Checkout Pro!

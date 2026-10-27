@@ -203,6 +203,7 @@ const DEFAULT_CHECKOUT: CheckoutConfig = {
   creditCardSecretToken: 'APP_USR-3016872973673511-102015-1793162807f06f1da8d82aba77c59288-697443735',
   mercadoPagoAccessToken: 'APP_USR-3016872973673511-102015-1793162807f06f1da8d82aba77c59288-697443735',
   mercadoPagoPublicKey: 'APP_USR-02dd55de-87cf-4ea4-a433-77a0bb018ac0',
+  mercadoPagoWebhookUrl: 'https://mdstudioplay.netlify.app/api/mercadopago/webhook',
   creditCardMaxInstallments: 6,
   creditCardInstallmentsFree: 3,
   creditCardInterestRate: 2.99,
