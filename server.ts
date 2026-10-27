@@ -10,6 +10,7 @@ import { isValidCPF } from './src/utils/cpfValidator';
 import { AbacatePay } from '@abacatepay/sdk';
 import { verifyWebhookSignature, verifyStandardWebhookSignature } from '@abacatepay/types';
 import QRCode from 'qrcode';
+import { generateBacenPixPayload, isBacenPixCode } from './src/utils/pixPayload';
 
 dotenv.config();
 
@@ -1049,15 +1050,25 @@ async function handleCreatePayment(req: Request, res: Response) {
       const mpStatus = String(mpData.status || (isOrdersApi ? 'created' : 'pending'));
       const statusDetail = String(mpData.status_detail || 'accredited');
       const transactionData = mpData.point_of_interaction?.transaction_data;
-      const rawQrCode = transactionData?.qr_code || mpData.qr_data || checkoutUrl;
-      let qrCodeBase64 = transactionData?.qr_code_base64 || '';
+      let rawQrCode = transactionData?.qr_code || mpData.qr_data || '';
+      if (!isCard && (!rawQrCode || !isBacenPixCode(rawQrCode))) {
+        rawQrCode = generateBacenPixPayload({
+          pixKey: '+5527996509853',
+          merchantName: 'ROAN1155540',
+          merchantCity: 'CANAVIEIRAS',
+          amount: Number(finalTotal.toFixed(2)),
+          txid: orderId.replace(/[^A-Za-z0-9]/g, '').slice(0, 25),
+          description: 'MD STUDIO PLAY',
+        });
+      }
+      let qrCodeBase64 = (transactionData?.qr_code && isBacenPixCode(transactionData?.qr_code)) ? (transactionData.qr_code_base64 || '') : '';
       const ticketUrl = transactionData?.ticket_url || checkoutUrl || '';
 
       if (qrCodeBase64 && !qrCodeBase64.startsWith('data:')) {
         qrCodeBase64 = `data:image/png;base64,${qrCodeBase64}`;
-      } else if (!qrCodeBase64 && (rawQrCode || checkoutUrl)) {
+      } else if (!qrCodeBase64 && rawQrCode) {
         try {
-          qrCodeBase64 = await QRCode.toDataURL(rawQrCode || checkoutUrl, {
+          qrCodeBase64 = await QRCode.toDataURL(rawQrCode, {
             errorCorrectionLevel: 'M',
             margin: 2,
             width: 320,

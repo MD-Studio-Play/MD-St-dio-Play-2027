@@ -25,8 +25,12 @@ import { PackThumbnail } from './PackThumbnail';
 import { db } from '../firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import QRCode from 'qrcode';
+import { generateBacenPixPayload, isBacenPixCode } from '../utils/pixPayload';
 
 const DEFAULT_MP_TOKEN = 'APP_USR-3016872973673511-102015-1793162807f06f1da8d82aba77c59288-697443735';
+const DEFAULT_PIX_KEY = '+5527996509853';
+const DEFAULT_BENEFICIARY = 'ROAN1155540';
+const DEFAULT_CITY = 'CANAVIEIRAS';
 
 interface PixCheckoutModalProps {
   isOpen: boolean;
@@ -398,10 +402,23 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       }
 
       if (isSuccess && data) {
+        // Garante que o qrCode seja estritamente um código PIX oficial do Banco Central (000201...)
+        let validPixCode = data.qrCode;
+        if (!isBacenPixCode(validPixCode)) {
+          validPixCode = generateBacenPixPayload({
+            pixKey: DEFAULT_PIX_KEY,
+            merchantName: DEFAULT_BENEFICIARY,
+            merchantCity: DEFAULT_CITY,
+            amount: Number((data.totalAmount || cartTotal).toFixed(2)),
+            txid: String(data.orderId || idempotencyKey).replace(/[^A-Za-z0-9]/g, '').slice(0, 25),
+            description: 'MD STUDIO PLAY',
+          });
+        }
+
         let finalQrCodeBase64 = data.qrCodeBase64 || null;
-        if (!finalQrCodeBase64 && (data.qrCode || data.checkout_url || data.checkoutUrl)) {
+        if (!finalQrCodeBase64 || !isBacenPixCode(data.qrCode)) {
           try {
-            finalQrCodeBase64 = await QRCode.toDataURL(data.qrCode || data.checkout_url || data.checkoutUrl, {
+            finalQrCodeBase64 = await QRCode.toDataURL(validPixCode, {
               width: 320,
               margin: 2,
               color: { dark: '#000000', light: '#ffffff' },
@@ -411,7 +428,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
 
         setOrderId(data.orderId);
         setPaymentId(data.paymentId);
-        setQrCode(data.qrCode || data.checkout_url || data.checkoutUrl);
+        setQrCode(validPixCode);
         setQrCodeBase64(finalQrCodeBase64);
         setTicketUrl(data.ticketUrl || null);
         setCheckoutUrl(data.checkout_url || data.checkoutUrl || null);
@@ -423,130 +440,142 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
       }
 
       // ━━━ 2. CLIENT-SIDE FALLBACK: MERCADO PAGO CHECKOUT PREFERENCES (100% CORS-SAFE) ━━━
-      // For static hosting environments (e.g. Firebase Hosting, GitHub Pages, Vercel) where server routes are not mounted.
-      // Preferences API supports CORS from the browser and forces PIX payment.
+      // Gera o BR Code oficial do Banco Central para o QR Code + Copia e Cola e usa a URL como link auxiliar
       try {
         const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
         const externalReference = `ext_ref_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         const originUrl = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://mdstudioplay.ai.studio';
 
-        const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${usedToken}`,
-          },
-          body: JSON.stringify({
-            items: items.map((i, idx) => ({
-              id: String(i.pack.id || `ITEM-${idx + 1}`).slice(0, 50),
-              title: String(i.pack.title || 'Produto MD Studio').slice(0, 150),
-              quantity: Math.max(1, Number(i.quantity) || 1),
-              currency_id: 'BRL',
-              unit_price: Number(Number(i.pack.discountPrice || 57.99).toFixed(2)),
-            })),
-            payer: {
-              name: firstName,
-              surname: lastName,
-              email: safeEmail,
-              identification: {
-                type: 'CPF',
-                number: cleanCpf,
-              },
-            },
-            payment_methods: {
-              excluded_payment_types: [
-                { id: 'ticket' },
-                { id: 'credit_card' },
-                { id: 'debit_card' },
-              ],
-            },
-            back_urls: {
-              success: `${originUrl}/area-do-cliente?status=sucesso`,
-              pending: `${originUrl}/area-do-cliente?status=pendente`,
-              failure: `${originUrl}/checkout?status=erro`,
-            },
-            auto_return: 'approved',
-            external_reference: externalReference,
-          }),
+        // Gera o código PIX oficial do Banco Central brasileiro (EMV BR Code 000201...)
+        const officialPixCode = generateBacenPixPayload({
+          pixKey: DEFAULT_PIX_KEY,
+          merchantName: DEFAULT_BENEFICIARY,
+          merchantCity: DEFAULT_CITY,
+          amount: Number(cartTotal.toFixed(2)),
+          txid: orderId.replace(/[^A-Za-z0-9]/g, '').slice(0, 25),
+          description: 'MD STUDIO PLAY',
         });
 
-        const prefData = await prefRes.json().catch(() => ({}));
-        if (prefRes.ok && (prefData.id || prefData.init_point)) {
-          const initPoint = prefData.init_point || prefData.sandbox_init_point || '';
-          let clientGeneratedQr: string | null = null;
-          try {
-            clientGeneratedQr = await QRCode.toDataURL(initPoint, {
-              width: 320,
-              margin: 2,
-              color: { dark: '#000000', light: '#ffffff' },
-            });
-          } catch (qrErr) {
-            console.warn('QR Code generation notice:', qrErr);
-          }
-
-          // Persist order in Firestore
-          try {
-            await setDoc(
-              doc(db, 'orders', orderId),
-              {
-                id: orderId,
-                orderNumber: orderId,
-                customer_id: cleanPhone,
-                customerName: cleanName,
-                customerEmail: cleanEmail,
-                customerPhone: cleanPhone,
-                customerCpf: cleanCpf,
-                external_reference: externalReference,
-                items: items.map((i) => ({
-                  id: i.pack.id,
-                  title: i.pack.title,
-                  quantity: i.quantity,
-                  unit_price: i.pack.discountPrice,
-                  postSaleUrl: i.pack.postSaleUrl,
-                })),
-                total: Number(cartTotal.toFixed(2)),
-                paymentMethod: 'pix',
-                paymentProvider: 'mercadopago',
-                payment_id: String(prefData.id),
-                preference_id: String(prefData.id),
-                payment_status: 'pending',
-                order_status: 'AGUARDANDO PAGAMENTO',
-                status: 'pending',
-                pixPayload: initPoint,
-                pixQrCodeUrl: clientGeneratedQr,
-                checkoutUrl: initPoint,
-                post_sale_urls: items.map((i) => i.pack.postSaleUrl).filter(Boolean),
-                date: new Date().toLocaleDateString('pt-BR'),
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-              { merge: true }
-            );
-          } catch (fsErr) {
-            console.warn('Notice: Firestore save in client fallback:', fsErr);
-          }
-
-          setOrderId(orderId);
-          setPaymentId(String(prefData.id));
-          setQrCode(initPoint);
-          setQrCodeBase64(clientGeneratedQr);
-          setTicketUrl(initPoint);
-          setCheckoutUrl(initPoint);
-          setFinalTotal(cartTotal);
-          setCountdown(600);
-          setViewState('pix_display');
-          startOrderVerification(orderId);
-          return;
-        } else if (prefData?.message) {
-          console.warn('Mercado Pago Preferences API returned message:', prefData.message);
+        let clientGeneratedQr: string | null = null;
+        try {
+          clientGeneratedQr = await QRCode.toDataURL(officialPixCode, {
+            width: 320,
+            margin: 2,
+            color: { dark: '#000000', light: '#ffffff' },
+          });
+        } catch (qrErr) {
+          console.warn('QR Code generation notice:', qrErr);
         }
-      } catch (prefCallErr) {
-        console.warn('Preferences fallback notice:', prefCallErr);
+
+        let initPoint = '';
+        try {
+          const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${usedToken}`,
+            },
+            body: JSON.stringify({
+              items: items.map((i, idx) => ({
+                id: String(i.pack.id || `ITEM-${idx + 1}`).slice(0, 50),
+                title: String(i.pack.title || 'Produto MD Studio').slice(0, 150),
+                quantity: Math.max(1, Number(i.quantity) || 1),
+                currency_id: 'BRL',
+                unit_price: Number(Number(i.pack.discountPrice || 57.99).toFixed(2)),
+              })),
+              payer: {
+                name: firstName,
+                surname: lastName,
+                email: safeEmail,
+                identification: {
+                  type: 'CPF',
+                  number: cleanCpf,
+                },
+              },
+              payment_methods: {
+                excluded_payment_types: [
+                  { id: 'ticket' },
+                  { id: 'credit_card' },
+                  { id: 'debit_card' },
+                ],
+              },
+              back_urls: {
+                success: `${originUrl}/area-do-cliente?status=sucesso`,
+                pending: `${originUrl}/area-do-cliente?status=pendente`,
+                failure: `${originUrl}/checkout?status=erro`,
+              },
+              auto_return: 'approved',
+              external_reference: externalReference,
+            }),
+          });
+
+          const prefData = await prefRes.json().catch(() => ({}));
+          if (prefRes.ok && (prefData.id || prefData.init_point)) {
+            initPoint = prefData.init_point || prefData.sandbox_init_point || '';
+          }
+        } catch (prefCallErr) {
+          console.warn('Preferences call notice:', prefCallErr);
+        }
+
+        // Persist order in Firestore
+        try {
+          await setDoc(
+            doc(db, 'orders', orderId),
+            {
+              id: orderId,
+              orderNumber: orderId,
+              customer_id: cleanPhone,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerPhone: cleanPhone,
+              customerCpf: cleanCpf,
+              external_reference: externalReference,
+              items: items.map((i) => ({
+                id: i.pack.id,
+                title: i.pack.title,
+                quantity: i.quantity,
+                unit_price: i.pack.discountPrice,
+                postSaleUrl: i.pack.postSaleUrl,
+              })),
+              total: Number(cartTotal.toFixed(2)),
+              paymentMethod: 'pix',
+              paymentProvider: 'mercadopago',
+              payment_id: orderId,
+              payment_status: 'pending',
+              order_status: 'AGUARDANDO PAGAMENTO',
+              status: 'pending',
+              pixPayload: officialPixCode,
+              pixQrCodeUrl: clientGeneratedQr,
+              checkoutUrl: initPoint || undefined,
+              post_sale_urls: items.map((i) => i.pack.postSaleUrl).filter(Boolean),
+              date: new Date().toLocaleDateString('pt-BR'),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch (fsErr) {
+          console.warn('Notice: Firestore save in client fallback:', fsErr);
+        }
+
+        setOrderId(orderId);
+        setPaymentId(orderId);
+        setQrCode(officialPixCode); // 100% Código BACEN PIX (000201...)
+        setQrCodeBase64(clientGeneratedQr);
+        setTicketUrl(initPoint || null);
+        setCheckoutUrl(initPoint || null);
+        setFinalTotal(cartTotal);
+        setCountdown(600);
+        setViewState('pix_display');
+        startOrderVerification(orderId);
+        return;
+      } catch (clientFallbackErr) {
+        console.warn('Client fallback notice:', clientFallbackErr);
       }
 
       const errMsg =
         data?.error ||
-        'Não foi possível gerar a cobrança PIX no Mercado Pago no momento. Por favor, verifique os dados ou tente novamente.';
+        'Não foi possível gerar a cobrança PIX no momento. Por favor, verifique os dados ou tente novamente.';
       setFormError(errMsg);
     } catch (err: any) {
       console.error('Falha ao gerar PIX:', err);
@@ -785,7 +814,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 {qrCodeBase64 ? (
                   <img
                     src={qrCodeBase64}
-                    alt="QR Code PIX Oficial Mercado Pago"
+                    alt="QR Code PIX Oficial Banco Central"
                     className="w-56 h-56 object-contain mx-auto"
                   />
                 ) : (
@@ -798,6 +827,12 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 <span className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-4 border-r-4 border-emerald-400" />
                 <span className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-4 border-l-4 border-emerald-400" />
                 <span className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-4 border-r-4 border-emerald-400" />
+              </div>
+
+              {/* Official BACEN PIX badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-semibold mx-auto">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>PIX Oficial Banco Central (Aceito em Todos os Bancos)</span>
               </div>
 
               {/* Value and Countdown Bar */}
