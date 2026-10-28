@@ -16,6 +16,7 @@ import {
   ExternalLink,
   ChevronRight,
   FileMusic,
+  CreditCard,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { CartItem } from '../types';
@@ -60,6 +61,10 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerCpf, setCustomerCpf] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Selected payment method: 'pix' | 'credit_card'
+  const [paymentMethod, setPaymentMethod] = useState<'pix' | 'credit_card'>('pix');
+  const [isProcessingCard, setIsProcessingCard] = useState(false);
 
   // Mercado Pago PIX Transaction states
   const [isGenerating, setIsGenerating] = useState(false);
@@ -585,6 +590,273 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
   };
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // MERCADO PAGO: Checkout Oficial com Cartão de Crédito
+  // Valida itens e cria preferência oficial no Mercado Pago com redirecionamento seguro
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const handleCreditCardPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+
+    const cleanName = customerName.trim();
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+    const cleanEmail = customerEmail.trim().toLowerCase();
+    const cleanCpf = customerCpf.replace(/\D/g, '');
+
+    if (!cleanName || cleanName.length < 3) {
+      setFormError('Por favor, informe seu nome completo.');
+      return;
+    }
+    if (!cleanPhone || cleanPhone.length < 10) {
+      setFormError('Por favor, informe um WhatsApp válido com DDD.');
+      return;
+    }
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setFormError('Por favor, informe um endereço de e-mail válido.');
+      return;
+    }
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      setFormError('O CPF é obrigatório para emissão e segurança do pagamento.');
+      return;
+    }
+    if (!isValidCPF(cleanCpf)) {
+      setFormError('Por favor, informe um CPF válido e existente.');
+      return;
+    }
+    if (items.length === 0) {
+      setFormError('Seu carrinho está vazio. Adicione produtos antes de finalizar.');
+      return;
+    }
+
+    setIsProcessingCard(true);
+
+    const nameParts = cleanName.split(' ').filter(Boolean);
+    const firstName = nameParts[0] || 'Cliente';
+    const lastName = nameParts.slice(1).join(' ') || 'VIP';
+    const isSeller = cleanEmail.includes('moriartdigital') || cleanEmail.includes('mdstudioplay');
+    const safeEmail = isSeller ? 'cliente.comprador@mdstudioplay.ai.studio' : cleanEmail;
+
+    const usedToken =
+      checkoutConfig?.mercadoPagoAccessToken &&
+      checkoutConfig.mercadoPagoAccessToken.trim().length > 20 &&
+      !checkoutConfig.mercadoPagoAccessToken.includes('mock')
+        ? checkoutConfig.mercadoPagoAccessToken.trim()
+        : DEFAULT_MP_TOKEN;
+
+    const originUrl = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://mdstudioplay.ai.studio';
+
+    try {
+      let isSuccess = false;
+      let data: any = null;
+
+      // 1. Tenta backend seguro com validação de preços contra adulteração
+      const backendEndpoints = [
+        '/api/mercadopago/create-checkout-pro',
+        '/api/mercadopago/create-order',
+        '/api/create-payment',
+        '/api/payment/create',
+      ];
+
+      for (const endpoint of backendEndpoints) {
+        if (isSuccess) break;
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({
+              payer: {
+                name: cleanName,
+                first_name: firstName,
+                last_name: lastName,
+                phone: cleanPhone,
+                cellphone: cleanPhone,
+                email: safeEmail,
+                cpf: cleanCpf,
+                taxId: cleanCpf,
+              },
+              items: items.map((i) => ({
+                id: i.pack.id,
+                title: i.pack.title,
+                quantity: i.quantity,
+                unit_price: i.pack.discountPrice,
+                postSaleUrl: i.pack.postSaleUrl,
+                coverImage: i.pack.image,
+              })),
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+          const text = await res.text();
+          if (text && !text.trim().startsWith('<')) {
+            const parsed = JSON.parse(text);
+            if (parsed && parsed.success && (parsed.checkout_url || parsed.initPoint)) {
+              data = parsed;
+              isSuccess = true;
+              break;
+            } else if (parsed && parsed.error) {
+              data = parsed;
+            }
+          }
+        } catch (fetchErr) {
+          console.warn(`Tentativa em ${endpoint} (contingência ativa):`, fetchErr);
+        }
+      }
+
+      if (isSuccess && data && (data.checkout_url || data.initPoint)) {
+        const checkoutRedirectUrl = data.checkout_url || data.initPoint;
+
+        try {
+          localStorage.setItem(
+            'pending_mp_order',
+            JSON.stringify({
+              orderId: data.orderId,
+              phone: cleanPhone,
+              email: cleanEmail,
+              timestamp: Date.now(),
+            })
+          );
+        } catch {}
+
+        onClearCart();
+        onClose();
+        window.location.href = checkoutRedirectUrl;
+        return;
+      }
+
+      // 2. Contingência client-side oficial do Mercado Pago Preferences API
+      const clientOrderId = `PEDIDO-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      const extRef = clientOrderId;
+
+      const prefRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${usedToken}`,
+        },
+        body: JSON.stringify({
+          items: items.map((i, idx) => ({
+            id: String(i.pack.id || `ITEM-${idx + 1}`).slice(0, 50),
+            title: String(i.pack.title || 'Produto MD Studio').slice(0, 150),
+            quantity: Math.max(1, Number(i.quantity) || 1),
+            currency_id: 'BRL',
+            unit_price: Number(Number(i.pack.discountPrice || 57.99).toFixed(2)),
+          })),
+          payer: {
+            name: firstName,
+            surname: lastName,
+            email: safeEmail,
+            identification: {
+              type: 'CPF',
+              number: cleanCpf,
+            },
+          },
+          payment_methods: {
+            excluded_payment_types: [{ id: 'ticket' }],
+            installments: 12,
+          },
+          back_urls: {
+            success: `${originUrl}/area-do-cliente?status=sucesso&order_id=${clientOrderId}`,
+            pending: `${originUrl}/area-do-cliente?status=pendente&order_id=${clientOrderId}`,
+            failure: `${originUrl}/checkout?status=erro&order_id=${clientOrderId}`,
+          },
+          auto_return: 'approved',
+          external_reference: extRef,
+          statement_descriptor: 'MD STUDIO',
+          notification_url: 'https://mdstudioplay.netlify.app/api/mercadopago/webhook',
+        }),
+      });
+
+      const prefData = await prefRes.json().catch(() => ({}));
+      if (prefRes.ok && (prefData.init_point || prefData.sandbox_init_point)) {
+        const isSandbox = usedToken.startsWith('TEST-');
+        const targetUrl = isSandbox && prefData.sandbox_init_point ? prefData.sandbox_init_point : prefData.init_point;
+
+        try {
+          await setDoc(
+            doc(db, 'orders', clientOrderId),
+            {
+              id: clientOrderId,
+              orderNumber: clientOrderId,
+              customer_id: cleanPhone,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerPhone: cleanPhone,
+              customerCpf: cleanCpf,
+              external_reference: extRef,
+              items: items.map((i) => ({
+                id: i.pack.id,
+                title: i.pack.title,
+                quantity: i.quantity,
+                unit_price: i.pack.discountPrice,
+                postSaleUrl: i.pack.postSaleUrl,
+              })),
+              total: Number(cartTotal.toFixed(2)),
+              paymentMethod: 'card',
+              payment_method: 'credit_card',
+              paymentProvider: 'mercadopago',
+              preference_id: String(prefData.id),
+              checkout_url: targetUrl,
+              payment_status: 'pending',
+              order_status: 'AGUARDANDO PAGAMENTO',
+              status: 'pending',
+              post_sale_urls: items.map((i) => i.pack.postSaleUrl).filter(Boolean),
+              date: new Date().toLocaleDateString('pt-BR'),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch (fsErr) {
+          console.warn('Notice: Firestore save in card fallback:', fsErr);
+        }
+
+        try {
+          localStorage.setItem(
+            'pending_mp_order',
+            JSON.stringify({
+              orderId: clientOrderId,
+              phone: cleanPhone,
+              email: cleanEmail,
+              timestamp: Date.now(),
+            })
+          );
+        } catch {}
+
+        onClearCart();
+        onClose();
+        window.location.href = targetUrl;
+        return;
+      }
+
+      setFormError(
+        data?.error ||
+        prefData?.message ||
+        'Não foi possível inicializar o checkout com cartão no Mercado Pago. Por favor tente novamente ou utilize o PIX.'
+      );
+    } catch (err: any) {
+      console.error('Falha ao processar pagamento por Cartão:', err);
+      setFormError('Erro ao conectar ao Mercado Pago. Por favor tente novamente ou escolha a opção PIX.');
+    } finally {
+      setIsProcessingCard(false);
+    }
+  };
+
+  const handleCheckoutSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (paymentMethod === 'pix') {
+      handleGeneratePixPayment(e);
+    } else {
+      handleCreditCardPayment(e);
+    }
+  };
+
   // Copy PIX Code to clipboard
   const handleCopyPix = () => {
     if (!qrCode) return;
@@ -609,18 +881,34 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
         {/* Top Header Bar */}
         <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between bg-[#13161c]">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
-              <QrCode className="w-5 h-5" />
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${
+              viewState === 'success'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : paymentMethod === 'credit_card'
+                ? 'bg-[#009ee3]/20 text-[#009ee3] border border-[#009ee3]/30'
+                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+            }`}>
+              {viewState === 'success' ? (
+                <CheckCircle2 className="w-5 h-5" />
+              ) : paymentMethod === 'credit_card' ? (
+                <CreditCard className="w-5 h-5" />
+              ) : (
+                <QrCode className="w-5 h-5" />
+              )}
             </div>
             <div>
               <h3 className="font-extrabold text-base text-white tracking-tight">
                 {viewState === 'success'
                   ? 'Pagamento Concluído'
-                  : 'Checkout PIX Oficial'}
+                  : paymentMethod === 'credit_card'
+                  ? 'Checkout Seguro · Cartão de Crédito'
+                  : 'Checkout Seguro · PIX Oficial'}
               </h3>
               <p className="text-xs text-neutral-400">
                 {viewState === 'success'
                   ? 'Acesso liberado instantaneamente'
+                  : paymentMethod === 'credit_card'
+                  ? 'Mercado Pago · Até 12x no Cartão'
                   : 'Mercado Pago · Banco Central do Brasil'}
               </p>
             </div>
@@ -692,8 +980,88 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 </div>
               </div>
 
+              {/* ━━━ ESCOLHA DA FORMA DE PAGAMENTO (PIX OU CARTÃO DE CRÉDITO) ━━━ */}
+              <div className="space-y-2.5">
+                <label className="block text-neutral-300 font-bold text-xs">
+                  Selecione a Forma de Pagamento:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Opção 1: PIX */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('pix');
+                      setFormError(null);
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      paymentMethod === 'pix'
+                        ? 'bg-emerald-500/10 border-emerald-500 ring-2 ring-emerald-500/20'
+                        : 'bg-[#14161d] border-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${
+                        paymentMethod === 'pix' ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white'
+                      }`}>
+                        <QrCode className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="font-extrabold text-white text-sm flex items-center gap-1.5">
+                          <span>PIX</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold uppercase">
+                            Instantâneo
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-neutral-400">QR Code oficial Banco Central</p>
+                      </div>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      paymentMethod === 'pix' ? 'border-emerald-500 bg-emerald-500' : 'border-neutral-500'
+                    }`}>
+                      {paymentMethod === 'pix' && <span className="w-1.5 h-1.5 rounded-full bg-black" />}
+                    </div>
+                  </button>
+
+                  {/* Opção 2: Cartão de Crédito */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('credit_card');
+                      setFormError(null);
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      paymentMethod === 'credit_card'
+                        ? 'bg-sky-500/10 border-[#009ee3] ring-2 ring-[#009ee3]/20'
+                        : 'bg-[#14161d] border-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${
+                        paymentMethod === 'credit_card' ? 'bg-[#009ee3] text-white' : 'bg-white/10 text-white'
+                      }`}>
+                        <CreditCard className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="font-extrabold text-white text-sm flex items-center gap-1.5">
+                          <span>Cartão de Crédito</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-bold uppercase">
+                            Mercado Pago
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-neutral-400">Até 12x no cartão de crédito</p>
+                      </div>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      paymentMethod === 'credit_card' ? 'border-[#009ee3] bg-[#009ee3]' : 'border-neutral-500'
+                    }`}>
+                      {paymentMethod === 'credit_card' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Payer Form */}
-              <form onSubmit={handleGeneratePixPayment} className="space-y-4">
+              <form onSubmit={handleCheckoutSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   {/* Full Name */}
                   <div className="space-y-1.5">
@@ -743,7 +1111,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                   {/* CPF */}
                   <div className="space-y-1.5">
                     <label className="block text-neutral-300 font-bold text-[11px]">
-                      CPF do Pagador (Obrigatório BACEN) *
+                      CPF do Titular *
                     </label>
                     <input
                       type="text"
@@ -760,33 +1128,54 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-400">
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Ambiente Seguro com Criptografia</span>
+                    <span>Ambiente Criptografado Mercado Pago</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Zap className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Liberação Automática na Área do Cliente</span>
+                    <span>Liberação Automática dos Arquivos</span>
                   </div>
                 </div>
 
-                {/* CTA Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isGenerating}
-                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-emerald-500/20 active:scale-98 cursor-pointer disabled:opacity-50"
-                >
-                  {isGenerating ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      <span>Gerando QR Code Oficial no Mercado Pago...</span>
-                    </>
-                  ) : (
-                    <>
-                      <QrCode className="w-5 h-5" />
-                      <span>GERAR COBRANÇA PIX ({formatCurrency(cartTotal)})</span>
-                      <ArrowRight className="w-5 h-5 ml-1" />
-                    </>
-                  )}
-                </button>
+                {/* CTA Submit Button (PIX vs Cartão de Crédito) */}
+                {paymentMethod === 'pix' ? (
+                  <button
+                    type="submit"
+                    disabled={isGenerating}
+                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-emerald-500/20 active:scale-98 cursor-pointer disabled:opacity-50"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>Gerando QR Code Oficial no Mercado Pago...</span>
+                      </>
+                    ) : (
+                      <>
+                        <QrCode className="w-5 h-5" />
+                        <span>GERAR COBRANÇA PIX ({formatCurrency(cartTotal)})</span>
+                        <ArrowRight className="w-5 h-5 ml-1" />
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isProcessingCard}
+                    className="w-full py-4 bg-[#009ee3] hover:bg-[#008ecb] text-white font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-[#009ee3]/25 active:scale-98 cursor-pointer disabled:opacity-50"
+                  >
+                    {isProcessingCard ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>Redirecionando para o Mercado Pago...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard className="w-5 h-5" />
+                        <span>PAGUE PELO MERCADO PAGO</span>
+                        <ArrowRight className="w-5 h-5 ml-1" />
+                      </>
+                    )}
+                  </button>
+                )}
               </form>
             </div>
           )}

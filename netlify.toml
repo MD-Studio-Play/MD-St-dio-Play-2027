@@ -19,6 +19,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mercadopago/create-checkout-pro"
+  to = "/.netlify/functions/create-checkout-pro"
+  status = 200
+
+[[redirects]]
+  from = "/api/mercadopago/create-order"
+  to = "/.netlify/functions/create-checkout-pro"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-payment"
+  to = "/.netlify/functions/create-checkout-pro"
+  status = 200
+
+[[redirects]]
+  from = "/api/mercadopago/verify-order"
+  to = "/.netlify/functions/verify-order"
+  status = 200
+
+[[redirects]]
   from = "/api/mercadopago/webhook"
   to = "/.netlify/functions/webhook"
   status = 200

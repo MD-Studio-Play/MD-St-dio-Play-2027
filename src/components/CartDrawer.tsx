@@ -11,6 +11,7 @@ import {
   Sparkles,
   QrCode,
   ShieldCheck,
+  CreditCard,
 } from 'lucide-react';
 import { CartItem } from '../types';
 import { useStore } from '../context/StoreContext';
@@ -275,8 +276,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 }}
                 className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-emerald-500/25 active:scale-98 cursor-pointer"
               >
-                <QrCode className="w-5 h-5" />
-                <span>FINALIZAR COMPRA (PIX)</span>
+                <QrCode className="w-5 h-5 shrink-0" />
+                <CreditCard className="w-5 h-5 shrink-0" />
+                <span>FINALIZAR COMPRA (PIX / CARTÃO)</span>
                 <ArrowRight className="w-4 h-4 ml-1" />
               </button>
 
@@ -291,7 +293,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-400 pt-0.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Pagamento instantâneo via PIX do Mercado Pago</span>
+                <span>Pagamento seguro via PIX ou Cartão de Crédito (Mercado Pago)</span>
               </div>
             </div>
           )}

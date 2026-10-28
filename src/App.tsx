@@ -24,6 +24,7 @@ import { ExtraCategoryView } from './components/ExtraCategoryView';
 import { FlyerShowPage } from './components/FlyerShowPage';
 import { MidiPageView } from './components/MidiPageView';
 import { PixCheckoutModal } from './components/PixCheckoutModal';
+import { PaymentReturnModal } from './components/PaymentReturnModal';
 import { SearchX, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -429,13 +430,16 @@ export default function App() {
         onOpenCheckout={() => setIsCheckoutOpen(true)}
       />
 
-      {/* Real-time PIX Checkout Modal (Official Mercado Pago) */}
+      {/* Real-time PIX & Cartão de Crédito Checkout Modal (Official Mercado Pago) */}
       <PixCheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         items={cartItems}
         onClearCart={handleClearCart}
       />
+
+      {/* Return from Mercado Pago Credit Card Checkout Verification */}
+      <PaymentReturnModal onOpenCheckout={() => setIsCheckoutOpen(true)} />
 
       {/* Side Menu Drawer */}
       <MenuDrawer
