@@ -29,7 +29,7 @@ import {
   handleFirestoreError,
   OperationType,
 } from '../firebase';
-import { doc, setDoc, getDocs, collection, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, getDocs, collection, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 interface StoreContextType {
   // Navigation / Mode
@@ -1640,9 +1640,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Format full phone with Brazil international country code if needed (55)
     const intlPhone = digits.startsWith('55') && digits.length >= 12 ? digits : `55${digits}`;
-    // Exact format required: *Código de autenticação* da MD Stúdio Play\n${generatedCode}
-    const message = `*Código de autenticação* da MD Stúdio Play\n${generatedCode}`;
+    
+    // Exact format required from WhatsApp authentication screenshot:
+    // Header: Código de autenticação MD Studio Play
+    // Body: {generatedCode}
+    // Action: [ 📋 Copiar código ]
+    const message = `Código de autenticação MD Studio Play\n\n*${generatedCode}*\n\n📋 Copiar código`;
     const whatsappUrl = `https://api.whatsapp.com/send?phone=${intlPhone}&text=${encodeURIComponent(message)}`;
+
+    // Store in Firestore whatsapp_otp_codes collection for secure verification
+    try {
+      setDoc(
+        doc(db, 'whatsapp_otp_codes', intlPhone),
+        {
+          phone: intlPhone,
+          code: generatedCode,
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    } catch {}
 
     // Dispatch to backend API / proxy
     try {
@@ -1678,6 +1696,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             message,
             text: message,
             code: generatedCode,
+            header: 'Código de autenticação MD Studio Play',
+            buttonText: 'Copiar código',
           }),
         });
       } catch (err) {
@@ -1724,14 +1744,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     code: string
   ): Promise<{ success: boolean; error?: string }> => {
     const digits = cleanPhoneDigits(phone);
+    const intlPhone = digits.startsWith('55') && digits.length >= 12 ? digits : `55${digits}`;
     const trimmedCode = code.trim();
     const storedCode = pendingWhatsAppCode || localStorage.getItem('jsp_pending_wa_code');
 
-    // Accept generated code or fallback test code 123456
-    if (trimmedCode !== storedCode && trimmedCode !== '123456') {
+    // 1. Direct memory/localStorage check or fallback test code 123456
+    let isCodeValid = trimmedCode === storedCode || trimmedCode === '123456';
+
+    // 2. Check Firestore whatsapp_otp_codes if not matched locally
+    if (!isCodeValid) {
+      try {
+        const snap = await getDoc(doc(db, 'whatsapp_otp_codes', intlPhone));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data?.code && String(data.code).trim() === trimmedCode) {
+            isCodeValid = true;
+          }
+        }
+      } catch {}
+    }
+
+    if (!isCodeValid) {
       return {
         success: false,
-        error: 'Código de validação incorreto ou expirado. Verifique os 6 dígitos.',
+        error: 'Código de validação incorreto ou expirado. Verifique os 6 dígitos recebidos no WhatsApp.',
       };
     }
 

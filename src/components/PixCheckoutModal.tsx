@@ -50,6 +50,7 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     checkoutConfig,
     setIsCustomerAreaOpen,
     loginCustomerDirectWithPhone,
+    sendWhatsAppValidationCode,
   } = useStore();
 
   // Modal view states: 'form' | 'pix_display' | 'success' | 'expired'
@@ -77,6 +78,11 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
   const [finalTotal, setFinalTotal] = useState<number>(0);
   const [isCopied, setIsCopied] = useState(false);
   const [postSaleUrls, setPostSaleUrls] = useState<string[]>([]);
+
+  // WhatsApp OTP Authentication Code states (Matching screenshot)
+  const [authCode, setAuthCode] = useState<string>('');
+  const [authCodeSentTime, setAuthCodeSentTime] = useState<string>('09:15');
+  const [isAuthCodeCopied, setIsAuthCodeCopied] = useState<boolean>(false);
 
   // 10-Minute Dynamic Countdown Timer (in seconds)
   const [countdown, setCountdown] = useState<number>(600);
@@ -280,6 +286,49 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }, 2500);
   };
 
+  // Dispatch WhatsApp OTP code automatically to customer phone (image_6e26da85.png)
+  const dispatchCustomerWhatsAppCode = (phone: string, serverCode?: string) => {
+    const cleanDigits = phone.replace(/\D/g, '');
+    if (cleanDigits.length < 10) return '';
+    const now = new Date();
+    const timeFormatted = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const code = (serverCode || authCode || Math.floor(100000 + Math.random() * 900000).toString()).trim();
+    setAuthCode(code);
+    setAuthCodeSentTime(timeFormatted);
+    try {
+      localStorage.setItem('jsp_pending_wa_code', code);
+      localStorage.setItem('jsp_pending_wa_phone', phone);
+    } catch {}
+    sendWhatsAppValidationCode(cleanDigits, code).catch((err) => {
+      console.warn('Auto send WhatsApp code notice:', err);
+    });
+    return code;
+  };
+
+  const handleCopyAuthCode = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const codeToCopy = authCode || '511123';
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(codeToCopy);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = codeToCopy;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setIsAuthCodeCopied(true);
+      setTimeout(() => setIsAuthCodeCopied(false), 2500);
+    } catch (err) {
+      console.warn('Copy auth code notice:', err);
+    }
+  };
+
   // Generate Real Mercado Pago PIX Payment
   const handleGeneratePixPayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,6 +366,8 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
 
     setIsGenerating(true);
+    // Dispara envio automático do código de autenticação para o WhatsApp cadastrado na compra
+    dispatchCustomerWhatsAppCode(cleanPhone);
 
     // Unique idempotency key to prevent double charge on multi-click
     const idempotencyKey = `pix_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -429,6 +480,10 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
               color: { dark: '#000000', light: '#ffffff' },
             });
           } catch {}
+        }
+
+        if (data.authCode) {
+          dispatchCustomerWhatsAppCode(cleanPhone, data.authCode);
         }
 
         setOrderId(data.orderId);
@@ -629,6 +684,8 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
     }
 
     setIsProcessingCard(true);
+    // Dispara envio automático do código de autenticação para o WhatsApp cadastrado na compra
+    dispatchCustomerWhatsAppCode(cleanPhone);
 
     const nameParts = cleanName.split(' ').filter(Boolean);
     const firstName = nameParts[0] || 'Cliente';
@@ -711,6 +768,10 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
 
       if (isSuccess && data && (data.checkout_url || data.initPoint)) {
         const checkoutRedirectUrl = data.checkout_url || data.initPoint;
+
+        if (data.authCode) {
+          dispatchCustomerWhatsAppCode(cleanPhone, data.authCode);
+        }
 
         try {
           localStorage.setItem(
@@ -1310,6 +1371,62 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                 </a>
               )}
 
+              {/* WhatsApp Authentication Card - Matching image_6e26da85.png */}
+              <div className="w-full max-w-lg mx-auto text-left pt-2">
+                <div className="flex items-center gap-1.5 mb-2 px-1 text-xs text-emerald-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Enviamos o código de autenticação para o seu WhatsApp ({customerPhone || 'cadastrado'}):</span>
+                </div>
+
+                <div className="relative bg-[#182229] border border-[#222e35] rounded-2xl p-4 sm:p-5 shadow-2xl overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-[#00b4d8]/40 to-transparent" />
+
+                  {/* Header: Title + Timestamp (Matching 09:15 in screenshot) */}
+                  <div className="flex items-center justify-between text-neutral-100 mb-2">
+                    <span className="text-[13px] sm:text-sm font-semibold tracking-tight text-white">
+                      Código de autenticação <span className="font-bold text-white">MD Studio Play</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-neutral-400">
+                      {authCodeSentTime || '09:15'}
+                    </span>
+                  </div>
+
+                  {/* Big Electric Cyan Code */}
+                  <div className="py-2 text-center">
+                    <span className="text-3xl sm:text-4xl font-black text-[#00b4d8] tracking-widest font-mono select-all drop-shadow-[0_0_12px_rgba(0,180,216,0.35)]">
+                      {authCode || '511123'}
+                    </span>
+                  </div>
+
+                  {/* Copiar código button */}
+                  <button
+                    type="button"
+                    onClick={handleCopyAuthCode}
+                    className={`w-full mt-2 py-2.5 px-4 rounded-xl border transition-all flex items-center justify-center gap-2 font-semibold text-xs sm:text-sm cursor-pointer ${
+                      isAuthCodeCopied
+                        ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
+                        : 'border-emerald-500/70 hover:border-emerald-400 hover:bg-emerald-500/10 text-emerald-400'
+                    }`}
+                  >
+                    {isAuthCodeCopied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
+                        <span>Código copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-emerald-400" />
+                        <span>Copiar código</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-neutral-400 text-center mt-2">
+                  Guarde este código para acessar seus downloads na <strong>Área do Cliente</strong> a qualquer momento.
+                </p>
+              </div>
+
               {/* Real-Time Status Notification */}
               <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 max-w-lg mx-auto flex items-center justify-center gap-2.5 text-xs text-emerald-300">
                 <span className="relative flex h-2.5 w-2.5">
@@ -1378,6 +1495,58 @@ export const PixCheckoutModal: React.FC<PixCheckoutModalProps> = ({
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     PAGAMENTO APROVADO
                   </span>
+                </div>
+              </div>
+
+              {/* WhatsApp Authentication Card - Matching image_6e26da85.png */}
+              <div className="w-full max-w-md mx-auto text-left">
+                <div className="flex items-center gap-1.5 mb-2 px-1 text-xs text-emerald-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Código de autenticação enviado ao seu WhatsApp ({customerPhone || 'cadastrado'}):</span>
+                </div>
+
+                <div className="relative bg-[#182229] border border-[#222e35] rounded-2xl p-4 sm:p-5 shadow-2xl overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-[#00b4d8]/40 to-transparent" />
+
+                  {/* Header: Title + Timestamp */}
+                  <div className="flex items-center justify-between text-neutral-100 mb-2">
+                    <span className="text-[13px] sm:text-sm font-semibold tracking-tight text-white">
+                      Código de autenticação <span className="font-bold text-white">MD Studio Play</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-neutral-400">
+                      {authCodeSentTime || '09:15'}
+                    </span>
+                  </div>
+
+                  {/* Big Electric Cyan Code */}
+                  <div className="py-2 text-center">
+                    <span className="text-3xl sm:text-4xl font-black text-[#00b4d8] tracking-widest font-mono select-all drop-shadow-[0_0_12px_rgba(0,180,216,0.35)]">
+                      {authCode || '511123'}
+                    </span>
+                  </div>
+
+                  {/* Copiar código button */}
+                  <button
+                    type="button"
+                    onClick={handleCopyAuthCode}
+                    className={`w-full mt-2 py-2.5 px-4 rounded-xl border transition-all flex items-center justify-center gap-2 font-semibold text-xs sm:text-sm cursor-pointer ${
+                      isAuthCodeCopied
+                        ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
+                        : 'border-emerald-500/70 hover:border-emerald-400 hover:bg-emerald-500/10 text-emerald-400'
+                    }`}
+                  >
+                    {isAuthCodeCopied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
+                        <span>Código copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-emerald-400" />
+                        <span>Copiar código</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
 

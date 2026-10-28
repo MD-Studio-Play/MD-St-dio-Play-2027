@@ -16,6 +16,8 @@ import {
   Clock,
   Sparkles,
   Info,
+  MessageSquare,
+  Send,
 } from 'lucide-react';
 import { db } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -43,6 +45,17 @@ export const CheckoutTab: React.FC = () => {
   const [isSandbox, setIsSandbox] = useState(false);
   const [showToken, setShowToken] = useState(false);
 
+  // WhatsApp Gateway Configuration state
+  const [whatsappGatewayUrl, setWhatsappGatewayUrl] = useState('');
+  const [whatsappGatewayToken, setWhatsappGatewayToken] = useState('');
+  const [whatsappTestPhone, setWhatsappTestPhone] = useState('27996509853');
+  const [isTestingWhatsApp, setIsTestingWhatsApp] = useState(false);
+  const [whatsappTestResult, setWhatsappTestResult] = useState<{
+    success: boolean;
+    message: string;
+    preview?: any;
+  } | null>(null);
+
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
 
@@ -62,20 +75,19 @@ export const CheckoutTab: React.FC = () => {
   const webhookUrl = 'https://mdstudioplay.netlify.app/api/mercadopago/webhook';
 
   const safeParseResponse = async (res: Response, retryFn?: () => Promise<any>): Promise<any> => {
-    const text = await res.text();
     try {
-      return JSON.parse(text);
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        if ((text.includes('<!DOCTYPE') || text.includes('<html') || res.status >= 500) && retryFn) {
+          await new Promise((r) => setTimeout(r, 1000));
+          return await retryFn();
+        }
+        return { success: res.ok, message: text || (res.ok ? 'Sucesso' : 'Erro no servidor') };
+      }
     } catch {
-      // If server briefly answered with HTML (e.g. dev server reloaded or proxy restarted)
-      if ((text.includes('<!DOCTYPE') || text.includes('<html') || res.status >= 500) && retryFn) {
-        // Wait 1s and retry once transparently
-        await new Promise((r) => setTimeout(r, 1000));
-        return await retryFn();
-      }
-      if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-        throw new Error('O servidor de desenvolvimento estava reiniciando. Por favor, clique novamente para confirmar.');
-      }
-      throw new Error(text || 'Resposta inválida do servidor.');
+      return { success: false, error: 'Erro de comunicação com o servidor' };
     }
   };
 
@@ -107,6 +119,8 @@ export const CheckoutTab: React.FC = () => {
             const d = snap.data();
             if (d?.mercadoPagoAccessToken) localToken = d.mercadoPagoAccessToken;
             if (d?.mercadoPagoPublicKey) localPublic = d.mercadoPagoPublicKey;
+            if (d?.whatsappGatewayUrl) setWhatsappGatewayUrl(d.whatsappGatewayUrl);
+            if (d?.whatsappGatewayToken) setWhatsappGatewayToken(d.whatsappGatewayToken);
           }
         } catch {}
 
@@ -138,6 +152,45 @@ export const CheckoutTab: React.FC = () => {
   useEffect(() => {
     fetchStatus();
   }, []);
+
+  const handleTestWhatsApp = async () => {
+    setIsTestingWhatsApp(true);
+    setWhatsappTestResult(null);
+    try {
+      const testCode = '665512';
+      const cleanPhone = whatsappTestPhone.replace(/\D/g, '') || '27996509853';
+      const res = await fetch('/api/whatsapp/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: cleanPhone,
+          code: testCode,
+          gatewayUrl: whatsappGatewayUrl.trim() || undefined,
+          gatewayToken: whatsappGatewayToken.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setWhatsappTestResult({
+          success: true,
+          message: `Código de autenticação 665512 despachado com sucesso para o WhatsApp ${cleanPhone}!`,
+          preview: data.preview,
+        });
+      } else {
+        setWhatsappTestResult({
+          success: false,
+          message: data.error || 'Falha ao despachar mensagem para o WhatsApp.',
+        });
+      }
+    } catch (err: any) {
+      setWhatsappTestResult({
+        success: false,
+        message: err.message || 'Erro ao comunicar com o servidor.',
+      });
+    } finally {
+      setIsTestingWhatsApp(false);
+    }
+  };
 
   const handleTestConnection = async () => {
     setIsTesting(true);
@@ -212,7 +265,7 @@ export const CheckoutTab: React.FC = () => {
         };
         setTestResult({
           success: true,
-          message: `Conexão com Mercado Pago validada com 100% de sucesso! Vendedor: ${seller.nickname} (ID: ${seller.id}). Credenciais prontas para receber pagamentos via PIX.`,
+          message: `Conexão com Mercado Pago validada com 100% de sucesso! Vendedor: ${seller.nickname} (ID: ${seller.id}). Credenciais prontas para receber pagamentos via PIX e Cartão de Crédito.`,
           seller,
         });
         return;
@@ -248,6 +301,8 @@ export const CheckoutTab: React.FC = () => {
           mercadoPagoAccessToken: cleanToken,
           mercadoPagoPublicKey: cleanPublic,
           mercadoPagoWebhookUrl: webhookUrl,
+          whatsappGatewayUrl: whatsappGatewayUrl.trim(),
+          whatsappGatewayToken: whatsappGatewayToken.trim(),
           isSandbox,
           updatedAt: new Date().toISOString(),
         };
@@ -266,6 +321,8 @@ export const CheckoutTab: React.FC = () => {
           body: JSON.stringify({
             accessToken: cleanToken,
             publicKey: cleanPublic,
+            whatsappGatewayUrl: whatsappGatewayUrl.trim(),
+            whatsappGatewayToken: whatsappGatewayToken.trim(),
             isSandbox,
           }),
         });
@@ -607,6 +664,125 @@ export const CheckoutTab: React.FC = () => {
                 <span><strong>Credenciais Protegidas:</strong> Tokens nunca trafegam no JavaScript público do navegador.</span>
               </li>
             </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* WhatsApp Automated OTP Dispatch Section */}
+      <div className="bg-[#111216] border border-emerald-500/30 rounded-2xl p-6 sm:p-8 space-y-6">
+        <div className="border-b border-white/10 pb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#25d366]/20 border border-[#25d366]/40 flex items-center justify-center text-[#25d366]">
+              <MessageSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Disparo Automático de Código no WhatsApp</h2>
+              <p className="text-xs text-neutral-400">Configuração de Gateway e Teste de Envio em Tempo Real</p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
+            Envio Automático Ativo
+          </span>
+        </div>
+
+        {/* Live Message Preview matching user screenshot */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                URL da API ou Webhook do WhatsApp <span className="text-neutral-500 font-normal">(Evolution API, Z-API, n8n, etc.)</span>
+              </label>
+              <input
+                type="url"
+                value={whatsappGatewayUrl}
+                onChange={(e) => setWhatsappGatewayUrl(e.target.value)}
+                placeholder="https://api.evolution.seuservidor.com/message/sendText/MDStudio"
+                className="w-full bg-[#0a0b0d] border border-white/15 focus:border-[#25d366] focus:ring-1 focus:ring-[#25d366] rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-neutral-500 font-mono transition-all outline-none"
+              />
+              <p className="text-[11px] text-neutral-400 mt-1">
+                Deixe em branco para usar o despachante padrão do servidor com validação segura no Firestore.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                Token de Autorização / API Key <span className="text-neutral-500 font-normal">(Opcional)</span>
+              </label>
+              <input
+                type="password"
+                value={whatsappGatewayToken}
+                onChange={(e) => setWhatsappGatewayToken(e.target.value)}
+                placeholder="Ex: Bearer seu_token_aqui ou apikey"
+                className="w-full bg-[#0a0b0d] border border-white/15 focus:border-[#25d366] focus:ring-1 focus:ring-[#25d366] rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-neutral-500 font-mono transition-all outline-none"
+              />
+            </div>
+
+            {/* Test WhatsApp Number */}
+            <div className="pt-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                Número para Teste de Envio
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  value={whatsappTestPhone}
+                  onChange={(e) => setWhatsappTestPhone(e.target.value)}
+                  placeholder="27 99650-9853"
+                  className="flex-1 bg-[#0a0b0d] border border-white/15 focus:border-[#25d366] rounded-xl px-4 py-2.5 text-sm text-white font-mono outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestWhatsApp}
+                  disabled={isTestingWhatsApp}
+                  className="px-4 py-2.5 rounded-xl bg-[#25d366] hover:bg-[#20ba59] text-black font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  {isTestingWhatsApp ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  <span>Testar Envio</span>
+                </button>
+              </div>
+            </div>
+
+            {whatsappTestResult && (
+              <div
+                className={`p-3.5 rounded-xl text-xs border ${
+                  whatsappTestResult.success
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                    : 'bg-red-950/60 border-red-500/40 text-red-300'
+                }`}
+              >
+                <div className="font-bold mb-1">{whatsappTestResult.success ? 'Envio Concluído com Sucesso!' : 'Aviso no Envio'}</div>
+                <div>{whatsappTestResult.message}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Preview: Exact WhatsApp Message as requested */}
+          <div className="bg-[#0e1014] border border-white/10 rounded-xl p-4 space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 block">
+              Formato Oficial da Mensagem que Chega no WhatsApp:
+            </span>
+            <div className="p-3.5 bg-[#1f2c34] border border-[#2a3942] rounded-2xl shadow-xl text-left relative overflow-hidden">
+              <div className="flex items-center justify-between text-xs text-neutral-300 font-semibold mb-1">
+                <span className="text-white text-[13px] font-bold tracking-tight">
+                  Código de autenticação MD Studio Play
+                </span>
+                <span className="text-[10px] text-neutral-400 font-mono">09:15</span>
+              </div>
+              <div className="text-3xl font-black text-sky-400 tracking-widest text-center py-2 font-mono select-all">
+                665512
+              </div>
+              <div className="w-full mt-2 py-2 px-3 rounded-xl bg-[#111b21] border border-[#25d366]/40 text-[#25d366] text-xs font-bold flex items-center justify-center gap-2">
+                <Copy className="w-4 h-4 text-[#25d366]" />
+                <span>Copiar código</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-neutral-500 italic">
+              O cliente recebe essa notificação e pode tocar em "Copiar código" para validar instantaneamente seu acesso.
+            </p>
           </div>
         </div>
       </div>

@@ -54,6 +54,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mercadopago/test-connection"
+  to = "/.netlify/functions/test-connection"
+  status = 200
+
+[[redirects]]
+  from = "/api/whatsapp/send-otp"
+  to = "/.netlify/functions/send-otp"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
