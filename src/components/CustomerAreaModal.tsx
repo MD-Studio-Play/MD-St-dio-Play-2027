@@ -11,7 +11,6 @@ import {
   ExternalLink,
   ArrowLeft,
   Music,
-  ShoppingBag,
   Clock,
   ShieldCheck,
   RefreshCw,
@@ -37,6 +36,7 @@ export const CustomerAreaModal: React.FC = () => {
     loginCustomerWithWhatsApp,
     loginCustomerDirectWithPhone,
     orders,
+    packs,
     updateOrderStatus,
     setIsAdminMode,
     themeConfig,
@@ -54,7 +54,6 @@ export const CustomerAreaModal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successInfo, setSuccessInfo] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'downloads' | 'orders'>('downloads');
 
   // Countdown timer for resending code
   useEffect(() => {
@@ -69,7 +68,6 @@ export const CustomerAreaModal: React.FC = () => {
     if (isCustomerAreaOpen) {
       if (customerUser) {
         setViewMode('dashboard');
-        setActiveTab('downloads');
       } else {
         setViewMode('login');
       }
@@ -201,21 +199,25 @@ export const CustomerAreaModal: React.FC = () => {
     if (Array.isArray(order.items)) {
       order.items.forEach((item: any) => {
         const pack = item.pack || item;
-        const packId = pack.id || `pack_${Math.random()}`;
+        const packId = pack.id || item.id || `pack_${Math.random()}`;
+        const catalogPack = packs.find(
+          (p) => p.id === packId || (pack.title && p.title.toLowerCase() === pack.title.toLowerCase())
+        );
+
         if (!seenPackIds.has(packId)) {
           seenPackIds.add(packId);
           authorizedPacks.push({
             pack: {
               id: packId,
-              title: pack.title || 'Produto Adquirido',
-              artist: pack.artist || '',
-              genre: pack.genre || 'Playback',
-              originalPrice: pack.originalPrice || 57.99,
-              discountPrice: pack.discountPrice || 57.99,
-              image: pack.image || pack.coverImage || '/md_studio_logo.jpg',
-              releaseYear: pack.releaseYear || 2026,
-              tracks: Array.isArray(pack.tracks) ? pack.tracks : [],
-              postSaleUrl: pack.postSaleUrl || (order.post_sale_urls && order.post_sale_urls[0]),
+              title: pack.title || catalogPack?.title || 'Produto Adquirido',
+              artist: pack.artist || catalogPack?.artist || '',
+              genre: pack.genre || catalogPack?.genre || 'Playback',
+              originalPrice: pack.originalPrice || catalogPack?.originalPrice || 57.99,
+              discountPrice: pack.discountPrice || catalogPack?.discountPrice || 57.99,
+              image: pack.image || pack.coverImage || catalogPack?.image || '/md_studio_logo.jpg',
+              releaseYear: pack.releaseYear || catalogPack?.releaseYear || 2026,
+              tracks: Array.isArray(pack.tracks) && pack.tracks.length > 0 ? pack.tracks : (catalogPack?.tracks || []),
+              postSaleUrl: pack.postSaleUrl || catalogPack?.postSaleUrl || (order.post_sale_urls && order.post_sale_urls[0]),
             },
             order,
           });
@@ -228,17 +230,21 @@ export const CustomerAreaModal: React.FC = () => {
         const pseudoId = `postsale_${order.id}_${idx}`;
         if (!seenPackIds.has(pseudoId)) {
           seenPackIds.add(pseudoId);
+          const relatedItem = order.items?.[idx] as any;
+          const relatedPack = packs.find(
+            (p) => p.id === relatedItem?.id || (relatedItem?.title && p.title.toLowerCase() === relatedItem.title.toLowerCase())
+          );
           authorizedPacks.push({
             pack: {
               id: pseudoId,
-              title: (order.items?.[idx] as any)?.pack?.title || (order.items?.[idx] as any)?.title || 'Coletânea Completa',
-              artist: '',
-              genre: 'Playbacks & Multitracks',
+              title: relatedItem?.pack?.title || relatedItem?.title || relatedPack?.title || 'Coletânea Completa',
+              artist: relatedPack?.artist || '',
+              genre: relatedPack?.genre || 'Playbacks & Multitracks',
               originalPrice: order.total || 57.99,
               discountPrice: order.total || 57.99,
-              image: '/md_studio_logo.jpg',
+              image: relatedPack?.image || '/md_studio_logo.jpg',
               releaseYear: 2026,
-              tracks: [],
+              tracks: relatedPack?.tracks || [],
               postSaleUrl: url,
             },
             order,
@@ -512,7 +518,7 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
         /* =========================================================================
            PAINEL DO CLIENTE AUTENTICADO (Downloads Liberados após Confirmação)
            ========================================================================= */
-        <div className="w-full max-w-3xl bg-[#101216] border border-white/10 rounded-3xl shadow-2xl shadow-black relative overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+        <div className="w-full max-w-5xl bg-[#101216] border border-white/10 rounded-3xl shadow-2xl shadow-black relative overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
           {/* Header Bar */}
           <div className="p-5 sm:p-6 border-b border-white/10 flex items-center justify-between bg-[#13161c]">
             <div className="flex items-center gap-3.5">
@@ -567,134 +573,32 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="px-5 sm:px-6 pt-4 border-b border-white/5 flex items-center gap-4 bg-[#0d0e12]">
-            <button
-              type="button"
-              onClick={() => setActiveTab('downloads')}
-              className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab === 'downloads'
-                  ? 'border-[#55c21b] text-white'
-                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
+          {/* Header Sub-bar: Meus Downloads */}
+          <div className="px-5 sm:px-6 py-3.5 border-b border-white/5 flex items-center justify-between bg-[#0d0e12]">
+            <div className="flex items-center gap-2 text-white text-xs sm:text-sm font-bold">
               <FolderDown className="w-4 h-4 text-[#55c21b]" />
               <span>Meus Downloads & Playbacks ({authorizedPacks.length})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('orders')}
-              className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab === 'orders'
-                  ? 'border-[#55c21b] text-white'
-                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              <ShoppingBag className="w-4 h-4 text-[#55c21b]" />
-              <span>Histórico de Pedidos ({userOrders.length})</span>
-            </button>
+            </div>
           </div>
 
           {/* Body Content */}
           <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
-            {activeTab === 'downloads' ? (
-              <div>
-                {/* Status Notice */}
-                {authorizedPacks.length > 0 ? (
-                  <div className="mb-5 p-3.5 rounded-2xl bg-[#55c21b]/10 border border-[#55c21b]/30 flex items-center gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-[#55c21b] shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold text-white">
-                        Pagamento Aprovado · Acesso Vitalício Liberado!
-                      </p>
-                      <p className="text-[11px] text-neutral-400">
-                        Faça o download de todos os seus playbacks masterizados em 320kbps e multitracks com stems individuais.
-                      </p>
-                    </div>
-                  </div>
-                ) : pendingOrders.length > 0 ? (
-                  <div className="mb-5 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
-                    <div className="flex items-center gap-2.5 text-amber-400">
-                      <Clock className="w-5 h-5 shrink-0" />
-                      <span className="text-xs font-bold uppercase tracking-wider">
-                        Pedido Registrado · Aguardando Liberação
-                      </span>
-                    </div>
-                    <p className="text-xs text-neutral-300">
-                      Seu pedido foi registrado! Assim que o atendimento confirmar o envio, seus downloads ficarão disponíveis diretamente nesta tela.
-                    </p>
-                    <div className="p-3 bg-black/40 rounded-xl border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                      <span>Este produto ainda não está disponível para download.</span>
-                    </div>
-                  </div>
-                ) : (
-                  /* Demonstração / Preview padrão caso o cliente ainda não tenha compras aprovadas */
-                  <div className="space-y-4 pt-1">
-                    {pendingOrders.length > 0 && (
-                      <div className="mb-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-2 text-amber-400">
-                            <Clock className="w-4 h-4 shrink-0" />
-                            <span className="text-xs font-bold uppercase tracking-wider">
-                              Pedido Registrado · Aguardando Confirmação
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSimulatePaymentApproval(pendingOrders[0].id)}
-                            className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer transition-colors"
-                          >
-                            Simular Liberação de Compra
-                          </button>
-                        </div>
-                        <p className="text-xs text-neutral-300">
-                          Seu pedido foi registrado no sistema. Assim que for confirmado, seus arquivos ficam liberados para download no card abaixo.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Card de Produto Liberado com Design Exato da Imagem (Piseirão 2026) */}
-                    <div className="w-full bg-[#0d0e12] border-2 border-red-600/70 hover:border-red-500 rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 flex flex-col sm:flex-row items-center gap-5 sm:gap-7 shadow-2xl relative overflow-hidden transition-all group">
-                      {/* Imagem Circular à Esquerda com Borda */}
-                      <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-xl overflow-hidden shrink-0 bg-black flex items-center justify-center relative">
-                        <img
-                          src="/pack_piseiro_forro_1790256479941.jpg"
-                          alt="Piseirão 2026"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = '/md_studio_logo.jpg';
-                          }}
-                        />
-                      </div>
-
-                      {/* Conteúdo Central/Direita: Título + Texto + Botão Verde DOWNLOAD */}
-                      <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left justify-center space-y-2.5 w-full">
-                        <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-sm">
-                          Piseirão 2026
-                        </h3>
-                        <p className="text-xs sm:text-sm text-neutral-200 font-medium leading-relaxed">
-                          Ao clicar no botão a baixo, será direcionado para a página de download
-                        </p>
-
-                        <a
-                          href="https://drive.google.com/drive/folders/1WGq3oiftXvoRbqABLY0KjPbH3pcBEiXw?usp=drive_link"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full max-w-md mt-1 py-3.5 sm:py-4 px-6 sm:px-8 rounded-2xl bg-[#16a34a] hover:bg-[#15803d] text-white font-extrabold text-base sm:text-lg md:text-xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-green-900/40 hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
-                        >
-                          <Download className="w-6 h-6 sm:w-7 sm:h-7 text-white stroke-[2.8]" />
-                          <span className="tracking-wide">DOWNLOAD de Arquivos</span>
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* Lista Oficial dos Produtos Comprados e Liberados */}
-                {authorizedPacks.length > 0 && (
-                  <div className="space-y-4 pt-3">
-                    <div className="text-xs sm:text-sm font-black text-[#00d06c] uppercase tracking-wider flex items-center justify-between">
+                {authorizedPacks.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="mb-4 p-3.5 rounded-2xl bg-[#55c21b]/10 border border-[#55c21b]/30 flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-[#55c21b] shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-white">
+                          Pagamento Aprovado · Acesso Vitalício Liberado!
+                        </p>
+                        <p className="text-[11px] text-neutral-400">
+                          Faça o download de todos os seus playbacks masterizados em 320kbps e multitracks com stems individuais.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-xs sm:text-sm font-black text-[#00d06c] uppercase tracking-wider flex items-center justify-between pb-1">
                       <div className="flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-[#00d06c]" />
                         <span>SEUS PRODUTOS ADQUIRIDOS</span>
@@ -704,16 +608,17 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
                       </span>
                     </div>
 
-                    <div className="space-y-4">
+                    {/* Grade com 2 colunas compactas conforme modelo da imagem */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
                       {authorizedPacks.map(({ pack, order }) => (
                         <div
                           key={pack.id}
-                          className="w-full bg-[#0d0e12] border-2 border-red-600/70 hover:border-red-500 rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 flex flex-col sm:flex-row items-center gap-5 sm:gap-7 shadow-2xl relative overflow-hidden transition-all group"
+                          className="w-full bg-[#0d0e12] border border-red-600/80 hover:border-red-500 rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 flex flex-row items-center gap-3 sm:gap-4 shadow-xl relative overflow-hidden transition-all group"
                         >
-                          {/* Imagem Circular com Borda */}
-                          <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-xl overflow-hidden shrink-0 bg-black flex items-center justify-center relative">
+                          {/* Imagem Circular com Borda fina e tamanho compacto */}
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-22 md:h-22 rounded-full border border-white/20 shadow-lg overflow-hidden shrink-0 bg-black flex items-center justify-center relative">
                             <img
-                              src={pack.image || '/pack_piseiro_forro_1790256479941.jpg'}
+                              src={pack.image || '/md_studio_logo.jpg'}
                               alt={pack.title}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                               onError={(e) => {
@@ -722,12 +627,12 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
                             />
                           </div>
 
-                          {/* Título + Informação + Botão Grande Verde DOWNLOAD */}
-                          <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left justify-center space-y-2.5 w-full">
-                            <h3 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-sm">
+                          {/* Título + Informação + Botão DOWNLOAD de Arquivos */}
+                          <div className="flex-1 flex flex-col justify-center min-w-0">
+                            <h3 className="text-base sm:text-lg md:text-xl font-black text-white tracking-tight leading-tight truncate drop-shadow-sm">
                               {pack.title}
                             </h3>
-                            <p className="text-xs sm:text-sm text-neutral-200 font-medium leading-relaxed">
+                            <p className="text-[10px] sm:text-[11px] text-neutral-300 font-medium leading-tight line-clamp-1 mt-1 mb-2.5">
                               Ao clicar no botão a baixo, será direcionado para a página de download
                             </p>
 
@@ -736,18 +641,18 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
                                 href={pack.postSaleUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="w-full max-w-md mt-1 py-3.5 sm:py-4 px-6 sm:px-8 rounded-2xl bg-[#16a34a] hover:bg-[#15803d] text-white font-extrabold text-base sm:text-lg md:text-xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-green-900/40 hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
+                                className="w-full py-2 sm:py-2.5 px-3 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.98] cursor-pointer"
                               >
-                                <Download className="w-6 h-6 sm:w-7 sm:h-7 text-white stroke-[2.8]" />
+                                <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-white stroke-[2.5]" />
                                 <span className="tracking-wide">DOWNLOAD de Arquivos</span>
                               </a>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => handleDownloadFile(pack)}
-                                className="w-full max-w-md mt-1 py-3.5 sm:py-4 px-6 sm:px-8 rounded-2xl bg-[#16a34a] hover:bg-[#15803d] text-white font-extrabold text-base sm:text-lg md:text-xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-green-900/40 hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
+                                className="w-full py-2 sm:py-2.5 px-3 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.98] cursor-pointer"
                               >
-                                <Download className="w-6 h-6 sm:w-7 sm:h-7 text-white stroke-[2.8]" />
+                                <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-white stroke-[2.5]" />
                                 <span className="tracking-wide">DOWNLOAD de Arquivos</span>
                               </button>
                             )}
@@ -756,64 +661,40 @@ Acesso permanente aos arquivos multitrack na nuvem autorizado.`;
                       ))}
                     </div>
                   </div>
-                )}
-              </div>
-            ) : (
-              /* Tab: Histórico de Pedidos */
-              <div className="space-y-3">
-                {userOrders.length === 0 ? (
-                  <p className="text-xs text-neutral-500 text-center py-8">
-                    Nenhum pedido registrado para este número.
-                  </p>
-                ) : (
-                  userOrders.map((ord) => (
-                    <div
-                      key={ord.id}
-                      className="p-4 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white font-mono">{ord.orderNumber}</span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              ord.status === 'completed' || ord.payment_status === 'approved' || ord.order_status === 'PAGAMENTO APROVADO'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : ord.status === 'cancelled' || ord.payment_status === 'rejected' || ord.order_status === 'PAGAMENTO REJEITADO'
-                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            }`}
-                          >
-                            {ord.status === 'completed' || ord.payment_status === 'approved' || ord.order_status === 'PAGAMENTO APROVADO'
-                              ? 'PAGO'
-                              : ord.status === 'cancelled' || ord.payment_status === 'rejected' || ord.order_status === 'PAGAMENTO REJEITADO'
-                              ? 'PAGAMENTO NÃO APROVADO'
-                              : 'AGUARDANDO PAGAMENTO'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-neutral-400 mt-1">
-                          {ord.date} · {ord.items.length} produto(s) · {ord.paymentMethod.toUpperCase()}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-xs font-bold text-white">
-                          R$ {ord.total.toFixed(2).replace('.', ',')}
-                        </span>
-                        {ord.status === 'pending' && (
-                          <button
-                            type="button"
-                            onClick={() => handleSimulatePaymentApproval(ord.id)}
-                            className="block text-[11px] text-[#55c21b] font-bold hover:underline mt-1 cursor-pointer"
-                          >
-                            Liberar Pagamento
-                          </button>
-                        )}
-                      </div>
+                ) : pendingOrders.length > 0 ? (
+                  <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3 text-left">
+                    <div className="flex items-center gap-2.5 text-amber-400">
+                      <Clock className="w-5 h-5 shrink-0" />
+                      <span className="text-xs font-bold uppercase tracking-wider">
+                        Pedido Registrado · Aguardando Confirmação
+                      </span>
                     </div>
-                  ))
+                    <p className="text-xs text-neutral-300">
+                      Seu pedido foi registrado no sistema. Assim que o pagamento for aprovado pelo Mercado Pago, os produtos comprados aparecerão aqui com o botão verde de download liberado.
+                    </p>
+                    <div className="p-3 bg-black/40 rounded-xl border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>Arquivos ainda não liberados para download.</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 px-4 rounded-3xl bg-white/[0.02] border border-white/5 space-y-3">
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-neutral-400">
+                      <Music className="w-8 h-8" />
+                    </div>
+                    <h4 className="text-base sm:text-lg font-bold text-white">Nenhum produto adquirido ainda</h4>
+                    <p className="text-xs text-neutral-400 max-w-sm mx-auto">
+                      Você ainda não possui playbacks ou multitracks vinculados a este WhatsApp. Ao realizar uma compra, seus produtos comprados aparecerão aqui automaticamente com o botão de download liberado.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomerAreaOpen(false)}
+                      className="mt-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs transition-colors cursor-pointer"
+                    >
+                      Ver Catálogo de Playbacks
+                    </button>
+                  </div>
                 )}
-              </div>
-            )}
           </div>
 
           {/* Footer Bar */}
