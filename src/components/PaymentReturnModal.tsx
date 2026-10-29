@@ -17,6 +17,8 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
   const [status, setStatus] = useState<'approved' | 'pending' | 'rejected' | null>(null);
   const [orderData, setOrderData] = useState<any>(null);
   const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
+  const [currentStoredOrder, setCurrentStoredOrder] = useState<any>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -33,8 +35,6 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
     const isFromMercadoPago =
       Boolean(paramPaymentId) ||
       Boolean(paramOrder) ||
-      path.includes('area-do-cliente') ||
-      hash.includes('area-do-cliente') ||
       Boolean(paramStatus && ['approved', 'pending', 'in_process', 'rejected', 'failure', 'sucesso', 'pendente', 'erro'].includes(paramStatus.toLowerCase()));
 
     let pendingStorage: any = null;
@@ -47,6 +47,8 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
       const effectiveOrderId = paramOrder || pendingStorage?.orderId;
       const effectivePaymentId = paramPaymentId || null;
 
+      setCurrentOrderId(effectiveOrderId);
+      setCurrentStoredOrder(pendingStorage);
       setIsOpen(true);
       setVerifying(true);
       setPaymentId(effectivePaymentId);
@@ -81,7 +83,13 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
         const data = await res.json().catch(() => null);
         if (data && data.success && data.order) {
           finalOrder = data.order;
-          if (data.isApproved || data.status === 'approved' || data.order?.payment_status === 'approved') {
+          if (
+            data.isApproved ||
+            data.status === 'approved' ||
+            data.order?.payment_status === 'approved' ||
+            data.order?.status === 'completed' ||
+            data.order?.order_status === 'PAGAMENTO APROVADO'
+          ) {
             verifiedApproved = true;
           } else if (data.status === 'in_process' || data.status === 'pending') {
             verifiedPending = true;
@@ -93,19 +101,22 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
         console.warn('Verificação via backend notice:', backendErr);
       }
 
-      // 2. Consulta de contingência no Firestore
-      if (!finalOrder && ordId) {
+      // 2. Consulta de contingência no Firestore (também checa se o admin aprovou manualmente)
+      if (ordId) {
         try {
           const snap = await getDoc(doc(db, 'orders', ordId));
           if (snap.exists()) {
-            finalOrder = snap.data();
+            const firestoreOrder = snap.data();
             if (
-              finalOrder.status === 'completed' ||
-              finalOrder.payment_status === 'approved' ||
-              finalOrder.order_status === 'PAGAMENTO APROVADO'
+              firestoreOrder.status === 'completed' ||
+              firestoreOrder.payment_status === 'approved' ||
+              firestoreOrder.order_status === 'PAGAMENTO APROVADO'
             ) {
+              finalOrder = firestoreOrder;
               verifiedApproved = true;
-            } else if (finalOrder.payment_status === 'pending') {
+              verifiedPending = false;
+            } else if (!finalOrder && firestoreOrder.payment_status === 'pending') {
+              finalOrder = firestoreOrder;
               verifiedPending = true;
             }
           }
@@ -180,19 +191,33 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
   };
 
   const handleClose = () => {
+    try {
+      localStorage.removeItem('pending_mp_order');
+    } catch {}
     setIsOpen(false);
   };
 
   const handleGoToCustomerArea = () => {
+    try {
+      localStorage.removeItem('pending_mp_order');
+    } catch {}
     setIsOpen(false);
     setIsCustomerAreaOpen(true);
   };
 
   const handleRetryPayment = () => {
+    try {
+      localStorage.removeItem('pending_mp_order');
+    } catch {}
     setIsOpen(false);
     if (onOpenCheckout) {
       onOpenCheckout();
     }
+  };
+
+  const handleRecheck = () => {
+    setVerifying(true);
+    verifyRealPayment(paymentId, currentOrderId, null, currentStoredOrder);
   };
 
   if (!isOpen) return null;
@@ -293,14 +318,25 @@ export const PaymentReturnModal: React.FC<PaymentReturnModalProps> = ({ onOpenCh
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleGoToCustomerArea}
-              className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black text-sm sm:text-base rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-amber-500/25 active:scale-98 cursor-pointer"
-            >
-              <span>ACESSAR SUAS COMPRAS</span>
-              <ArrowRight className="w-5 h-5 ml-1" />
-            </button>
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleRecheck}
+                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/25 active:scale-98 cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>CONSULTAR APROVAÇÃO AGORA</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleGoToCustomerArea}
+                className="w-full py-3 bg-[#1e222b] hover:bg-[#282d39] text-white font-bold text-xs sm:text-sm rounded-2xl flex items-center justify-center gap-2 transition-all border border-white/10 cursor-pointer"
+              >
+                <span>ACESSAR SUAS COMPRAS</span>
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </button>
+            </div>
           </div>
         )}
 
