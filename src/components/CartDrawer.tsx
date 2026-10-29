@@ -4,7 +4,6 @@ import {
   Trash2,
   Plus,
   Minus,
-  MessageCircle,
   FileMusic,
   ShoppingBag,
   ArrowRight,
@@ -59,42 +58,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     }).format(val);
   };
 
-  // Direct WhatsApp order dispatch
-  const handleOrderViaWhatsApp = () => {
-    if (items.length === 0) return;
-
-    let targetPhone = (menuConfig.whatsappNumber || '5527996509853').replace(/\D/g, '');
-    if (targetPhone.length <= 11 && !targetPhone.startsWith('55')) {
-      targetPhone = `55${targetPhone}`;
-    }
-
-    const itemsList = items
-      .map(
-        (item, idx) =>
-          `${idx + 1}. *${item.pack.title}* (${item.quantity}x) - ${formatCurrency(
-            item.pack.discountPrice * item.quantity
-          )}`
-      )
-      .join('\n');
-
-    const message = [
-      '🎶 *NOVO PEDIDO - MD STÚDIO PLAY* 🎶',
-      '',
-      'Olá! Gostaria de adquirir os seguintes playbacks/multitracks:',
-      '',
-      itemsList,
-      '',
-      `💰 *Valor Total: ${formatCurrency(total)}*`,
-      '',
-      'Como posso prosseguir para receber o acesso aos arquivos?',
-    ].join('\n');
-
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(
-      message
-    )}`;
-
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden animate-in fade-in duration-200">
@@ -280,15 +243,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <CreditCard className="w-5 h-5 shrink-0" />
                 <span>FINALIZAR COMPRA (PIX / CARTÃO)</span>
                 <ArrowRight className="w-4 h-4 ml-1" />
-              </button>
-
-              <button
-                type="button"
-                onClick={handleOrderViaWhatsApp}
-                className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <MessageCircle className="w-4 h-4 text-[#25D366]" />
-                <span>Ou pedir diretamente pelo WhatsApp</span>
               </button>
 
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-400 pt-0.5">
