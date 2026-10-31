@@ -1,0 +1,47 @@
+{
+  "totalVisits": 2,
+  "uniqueVisitors": 2,
+  "visitsToday": 2,
+  "uniqueToday": 2,
+  "visitsThisWeek": 2,
+  "visitsThisMonth": 2,
+  "todayDate": "2026-10-30",
+  "allVisitorIds": [
+    "test_admin_visitor",
+    "test_mobile_visitor"
+  ],
+  "todayVisitorIds": [
+    "test_admin_visitor",
+    "test_mobile_visitor"
+  ],
+  "deviceBreakdown": {
+    "desktop": 1,
+    "mobile": 1,
+    "tablet": 0
+  },
+  "pageBreakdown": {
+    "Loja Principal": 1,
+    "MIDI Variados": 0,
+    "MIDI Gospel": 1,
+    "Flyer Show": 0,
+    "Área do Cliente": 0
+  },
+  "dailyHistory": [],
+  "recentVisits": [
+    {
+      "id": "test_mobile_visitor",
+      "timestamp": "2026-10-30T15:05:04.509Z",
+      "path": "MIDI Gospel",
+      "device": "mobile",
+      "browser": "Safari"
+    },
+    {
+      "id": "test_admin_visitor",
+      "timestamp": "2026-10-30T15:04:38.095Z",
+      "path": "Loja Principal",
+      "device": "desktop",
+      "browser": "Google Chrome"
+    }
+  ],
+  "lastUpdated": "2026-10-30T15:05:04.509Z"
+}

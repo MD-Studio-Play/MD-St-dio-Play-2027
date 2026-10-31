@@ -12,6 +12,10 @@ import {
   CheckCircle2,
   Clock,
   ArrowUpRight,
+  Eye,
+  Users,
+  Smartphone,
+  Laptop,
 } from 'lucide-react';
 
 interface DashboardTabProps {
@@ -19,7 +23,7 @@ interface DashboardTabProps {
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) => {
-  const { packs = [], orders = [], checkoutConfig, firebaseConfig } = useStore();
+  const { packs = [], orders = [], checkoutConfig, firebaseConfig, visitorStats } = useStore();
 
   const safeOrders = Array.isArray(orders) ? orders : [];
   const safePacks = Array.isArray(packs) ? packs : [];
@@ -73,7 +77,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
       </div>
 
       {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Total Revenue */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-4 sm:p-5 relative overflow-hidden group">
           <div className="flex items-center justify-between text-neutral-400 text-xs">
@@ -117,6 +121,29 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
           </div>
         </div>
 
+        {/* Total Visits KPI Card */}
+        <div
+          onClick={() => onNavigateToTab('visitas')}
+          className="bg-[#111216] border border-white/[0.08] hover:border-emerald-500/40 rounded-2xl p-4 sm:p-5 relative overflow-hidden group cursor-pointer transition-all hover:scale-[1.01]"
+          title="Clique para abrir detalhes de tráfego e visitas"
+        >
+          <div className="flex items-center justify-between text-neutral-400 text-xs">
+            <span className="font-semibold">Visitas no Site</span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-black transition-colors">
+              <Eye className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              {(visitorStats?.totalVisits || 0).toLocaleString('pt-BR')}
+            </span>
+          </div>
+          <div className="mt-2 text-[11px] text-neutral-400 flex items-center justify-between">
+            <span>Hoje: <strong className="text-emerald-400">{visitorStats?.visitsToday || 0}</strong></span>
+            <span className="text-neutral-500">Únicos: {visitorStats?.uniqueVisitors || 0}</span>
+          </div>
+        </div>
+
         {/* Active Playback Packs */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-4 sm:p-5 relative overflow-hidden group">
           <div className="flex items-center justify-between text-neutral-400 text-xs">
@@ -155,7 +182,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
       </div>
 
       {/* System Status & Gateways Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Orders & Reconciliation Card */}
         <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -286,6 +313,54 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateToTab }) =
             className="w-full py-2 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
           >
             <span>Painel de Integração Firebase</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Visitor Traffic & Telemetry Card */}
+        <div className="bg-[#111216] border border-white/[0.08] rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Tráfego & Visitas</h4>
+                <p className="text-[11px] text-neutral-400">Contador em Tempo Real</p>
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold">
+              AO VIVO
+            </span>
+          </div>
+
+          <div className="bg-black/40 rounded-xl p-3 border border-white/5 space-y-1.5 text-xs">
+            <div className="flex justify-between text-neutral-400">
+              <span>Visitas Totais:</span>
+              <span className="font-mono text-emerald-400 text-[11px] font-bold">
+                {(visitorStats?.totalVisits || 0).toLocaleString('pt-BR')} acessos
+              </span>
+            </div>
+            <div className="flex justify-between text-neutral-400">
+              <span>Visitantes Únicos:</span>
+              <span className="font-mono text-white text-[11px] font-bold">
+                {(visitorStats?.uniqueVisitors || 0).toLocaleString('pt-BR')} pessoas
+              </span>
+            </div>
+            <div className="flex justify-between text-neutral-400">
+              <span>Acessos Hoje:</span>
+              <span className="text-amber-400 font-bold text-[11px]">
+                {visitorStats?.visitsToday || 0} visitas
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('visitas')}
+            className="w-full py-2 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+          >
+            <span>Ver Métricas & Relatório de Visitas</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>

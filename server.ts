@@ -2983,6 +2983,297 @@ app.post('/api/whatsapp/send-otp', async (req: Request, res: Response) => {
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 6.6. API: Visitor Analytics & Traffic Telemetry
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const ANALYTICS_FILE = path.resolve(__dirname, '.site-analytics.json');
+
+interface AnalyticsState {
+  totalVisits: number;
+  uniqueVisitors: number;
+  visitsToday: number;
+  uniqueToday: number;
+  visitsThisWeek: number;
+  visitsThisMonth: number;
+  todayDate: string;
+  allVisitorIds: string[];
+  todayVisitorIds: string[];
+  deviceBreakdown: {
+    desktop: number;
+    mobile: number;
+    tablet: number;
+  };
+  pageBreakdown: Record<string, number>;
+  dailyHistory: Array<{
+    date: string;
+    visits: number;
+    unique: number;
+  }>;
+  recentVisits: Array<{
+    id: string;
+    timestamp: string;
+    path: string;
+    device: 'mobile' | 'desktop' | 'tablet';
+    browser?: string;
+    referrer?: string;
+  }>;
+  lastUpdated: string;
+}
+
+function getTodayIsoDate(): string {
+  try {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  } catch {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+function getInitialAnalyticsState(): AnalyticsState {
+  const today = getTodayIsoDate();
+  return {
+    totalVisits: 0,
+    uniqueVisitors: 0,
+    visitsToday: 0,
+    uniqueToday: 0,
+    visitsThisWeek: 0,
+    visitsThisMonth: 0,
+    todayDate: today,
+    allVisitorIds: [],
+    todayVisitorIds: [],
+    deviceBreakdown: {
+      desktop: 0,
+      mobile: 0,
+      tablet: 0,
+    },
+    pageBreakdown: {
+      'Loja Principal': 0,
+      'MIDI Variados': 0,
+      'MIDI Gospel': 0,
+      'Flyer Show': 0,
+      'Área do Cliente': 0,
+    },
+    dailyHistory: [],
+    recentVisits: [],
+    lastUpdated: new Date().toISOString(),
+  };
+}
+
+let memoryAnalytics: AnalyticsState = getInitialAnalyticsState();
+
+function loadAnalyticsFromFile(): void {
+  try {
+    if (fs.existsSync(ANALYTICS_FILE)) {
+      const content = fs.readFileSync(ANALYTICS_FILE, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed.totalVisits === 'number') {
+        memoryAnalytics = {
+          ...getInitialAnalyticsState(),
+          ...parsed,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Analytics load warning]:', err?.message);
+  }
+}
+
+function saveAnalyticsToFile(): void {
+  try {
+    fs.writeFileSync(ANALYTICS_FILE, JSON.stringify(memoryAnalytics, null, 2), 'utf-8');
+  } catch (err: any) {
+    console.warn('[Analytics write warning]:', err?.message);
+  }
+}
+
+function checkDateRollover(): void {
+  const currentToday = getTodayIsoDate();
+  if (memoryAnalytics.todayDate !== currentToday) {
+    if (memoryAnalytics.visitsToday > 0 || memoryAnalytics.uniqueToday > 0) {
+      const existingEntryIdx = memoryAnalytics.dailyHistory.findIndex((h) => h.date === memoryAnalytics.todayDate);
+      if (existingEntryIdx >= 0) {
+        memoryAnalytics.dailyHistory[existingEntryIdx] = {
+          date: memoryAnalytics.todayDate,
+          visits: memoryAnalytics.visitsToday,
+          unique: memoryAnalytics.uniqueToday,
+        };
+      } else {
+        memoryAnalytics.dailyHistory.push({
+          date: memoryAnalytics.todayDate,
+          visits: memoryAnalytics.visitsToday,
+          unique: memoryAnalytics.uniqueToday,
+        });
+      }
+    }
+    if (memoryAnalytics.dailyHistory.length > 30) {
+      memoryAnalytics.dailyHistory = memoryAnalytics.dailyHistory.slice(-30);
+    }
+
+    memoryAnalytics.todayDate = currentToday;
+    memoryAnalytics.visitsToday = 0;
+    memoryAnalytics.uniqueToday = 0;
+    memoryAnalytics.todayVisitorIds = [];
+  }
+
+  const now = new Date();
+  const currentMonthPrefix = currentToday.substring(0, 7);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const weekVisitsFromHistory = memoryAnalytics.dailyHistory
+    .filter((h) => h.date >= sevenDaysAgo && h.date < currentToday)
+    .reduce((sum, h) => sum + h.visits, 0);
+  memoryAnalytics.visitsThisWeek = weekVisitsFromHistory + memoryAnalytics.visitsToday;
+
+  const monthVisitsFromHistory = memoryAnalytics.dailyHistory
+    .filter((h) => h.date.startsWith(currentMonthPrefix) && h.date < currentToday)
+    .reduce((sum, h) => sum + h.visits, 0);
+  memoryAnalytics.visitsThisMonth = monthVisitsFromHistory + memoryAnalytics.visitsToday;
+}
+
+loadAnalyticsFromFile();
+checkDateRollover();
+
+let firestoreSyncTimeout: NodeJS.Timeout | null = null;
+function scheduleFirestoreAnalyticsSync(): void {
+  if (firestoreSyncTimeout) clearTimeout(firestoreSyncTimeout);
+  firestoreSyncTimeout = setTimeout(async () => {
+    try {
+      const summaryRef = doc(db, 'site_analytics', 'summary');
+      await setDoc(
+        summaryRef,
+        {
+          totalVisits: memoryAnalytics.totalVisits,
+          uniqueVisitors: memoryAnalytics.uniqueVisitors,
+          visitsToday: memoryAnalytics.visitsToday,
+          uniqueToday: memoryAnalytics.uniqueToday,
+          visitsThisWeek: memoryAnalytics.visitsThisWeek,
+          visitsThisMonth: memoryAnalytics.visitsThisMonth,
+          deviceBreakdown: memoryAnalytics.deviceBreakdown,
+          pageBreakdown: memoryAnalytics.pageBreakdown,
+          dailyHistory: memoryAnalytics.dailyHistory,
+          todayDate: memoryAnalytics.todayDate,
+          lastUpdated: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err: any) {
+      console.debug('[Firestore Analytics Sync Notice]:', err?.message);
+    }
+  }, 2000);
+}
+
+function getFriendlyPageLabel(rawPath: string): string {
+  const p = (rawPath || '').toLowerCase();
+  if (p.includes('midi_variados') || p.includes('midi-variados')) return 'MIDI Variados';
+  if (p.includes('midi_gospel') || p.includes('midi-gospel')) return 'MIDI Gospel';
+  if (p.includes('flyer') || p.includes('flyer_show')) return 'Flyer Show';
+  if (p.includes('area-do-cliente') || p.includes('area_cliente')) return 'Área do Cliente';
+  if (p.includes('checkout') || p.includes('carrinho')) return 'Checkout / Carrinho';
+  return 'Loja Principal';
+}
+
+app.post('/api/analytics/track-visit', (req: Request, res: Response) => {
+  try {
+    const { visitorId, path: rawPath, device: rawDevice, browser, referrer } = req.body || {};
+    const vid = String(visitorId || 'v_anon').trim();
+    const device: 'mobile' | 'desktop' | 'tablet' =
+      rawDevice === 'mobile' || rawDevice === 'tablet' ? rawDevice : 'desktop';
+    const pageLabel = getFriendlyPageLabel(rawPath || 'home');
+
+    checkDateRollover();
+
+    memoryAnalytics.totalVisits += 1;
+    memoryAnalytics.visitsToday += 1;
+    memoryAnalytics.visitsThisWeek += 1;
+    memoryAnalytics.visitsThisMonth += 1;
+
+    if (!memoryAnalytics.allVisitorIds.includes(vid)) {
+      memoryAnalytics.allVisitorIds.push(vid);
+      if (memoryAnalytics.allVisitorIds.length > 5000) {
+        memoryAnalytics.allVisitorIds.shift();
+      }
+      memoryAnalytics.uniqueVisitors += 1;
+    }
+
+    if (!memoryAnalytics.todayVisitorIds.includes(vid)) {
+      memoryAnalytics.todayVisitorIds.push(vid);
+      memoryAnalytics.uniqueToday += 1;
+    }
+
+    if (!memoryAnalytics.deviceBreakdown) {
+      memoryAnalytics.deviceBreakdown = { desktop: 0, mobile: 0, tablet: 0 };
+    }
+    memoryAnalytics.deviceBreakdown[device] = (memoryAnalytics.deviceBreakdown[device] || 0) + 1;
+
+    if (!memoryAnalytics.pageBreakdown) {
+      memoryAnalytics.pageBreakdown = {};
+    }
+    memoryAnalytics.pageBreakdown[pageLabel] = (memoryAnalytics.pageBreakdown[pageLabel] || 0) + 1;
+
+    if (!Array.isArray(memoryAnalytics.recentVisits)) {
+      memoryAnalytics.recentVisits = [];
+    }
+    memoryAnalytics.recentVisits.unshift({
+      id: vid,
+      timestamp: new Date().toISOString(),
+      path: pageLabel,
+      device,
+      browser: typeof browser === 'string' ? browser.slice(0, 50) : undefined,
+      referrer: typeof referrer === 'string' ? referrer.slice(0, 60) : undefined,
+    });
+    if (memoryAnalytics.recentVisits.length > 25) {
+      memoryAnalytics.recentVisits.pop();
+    }
+
+    memoryAnalytics.lastUpdated = new Date().toISOString();
+
+    saveAnalyticsToFile();
+    scheduleFirestoreAnalyticsSync();
+
+    return res.json({
+      success: true,
+      stats: {
+        totalVisits: memoryAnalytics.totalVisits,
+        uniqueVisitors: memoryAnalytics.uniqueVisitors,
+        visitsToday: memoryAnalytics.visitsToday,
+        uniqueToday: memoryAnalytics.uniqueToday,
+        visitsThisWeek: memoryAnalytics.visitsThisWeek,
+        visitsThisMonth: memoryAnalytics.visitsThisMonth,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao registrar visita' });
+  }
+});
+
+app.get('/api/analytics/stats', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  checkDateRollover();
+
+  return res.json({
+    success: true,
+    stats: {
+      totalVisits: memoryAnalytics.totalVisits,
+      uniqueVisitors: memoryAnalytics.uniqueVisitors,
+      visitsToday: memoryAnalytics.visitsToday,
+      uniqueToday: memoryAnalytics.uniqueToday,
+      visitsThisWeek: memoryAnalytics.visitsThisWeek,
+      visitsThisMonth: memoryAnalytics.visitsThisMonth,
+      deviceBreakdown: memoryAnalytics.deviceBreakdown,
+      pageBreakdown: memoryAnalytics.pageBreakdown,
+      dailyHistory: memoryAnalytics.dailyHistory,
+      recentVisits: memoryAnalytics.recentVisits,
+      lastUpdated: memoryAnalytics.lastUpdated,
+    },
+  });
+});
+
+app.post('/api/analytics/reset', (_req: Request, res: Response) => {
+  memoryAnalytics = getInitialAnalyticsState();
+  saveAnalyticsToFile();
+  scheduleFirestoreAnalyticsSync();
+  return res.json({ success: true, message: 'Estatísticas de visitas resetadas com sucesso.' });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 7. Setup Vite or Static File Serving
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function startServer() {

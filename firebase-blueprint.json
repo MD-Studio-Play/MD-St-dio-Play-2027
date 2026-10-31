@@ -179,6 +179,40 @@
         }
       },
       "required": ["email", "name"]
+    },
+    "SiteAnalytics": {
+      "title": "SiteAnalytics",
+      "description": "Aggregated visitor counts and traffic metrics for admin monitoring",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Analytics document key",
+          "maxLength": 64
+        },
+        "totalVisits": {
+          "type": "number",
+          "description": "Total all-time page views and visitor accesses"
+        },
+        "uniqueVisitors": {
+          "type": "number",
+          "description": "Total unique visitor identifiers"
+        },
+        "visitsToday": {
+          "type": "number",
+          "description": "Visits recorded on the current calendar day"
+        },
+        "uniqueToday": {
+          "type": "number",
+          "description": "Unique visitors recorded on the current calendar day"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last visit update",
+          "maxLength": 50
+        }
+      },
+      "required": ["totalVisits", "uniqueVisitors"]
     }
   },
   "firestore": {
@@ -201,6 +235,10 @@
     "/admins/{adminId}": {
       "schema": "AdminUser",
       "description": "Registered system administrators for backend management"
+    },
+    "/site_analytics/{analyticsId}": {
+      "schema": "SiteAnalytics",
+      "description": "Storefront traffic statistics and visitor count telemetry"
     }
   }
 }

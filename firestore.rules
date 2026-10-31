@@ -93,6 +93,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Visitor Analytics & Statistics
+    match /site_analytics/{analyticsId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(analyticsId);
+      allow delete: if isAdmin();
+    }
+
     // Administrators
     match /admins/{adminId} {
       allow read, write: if isSignedIn();

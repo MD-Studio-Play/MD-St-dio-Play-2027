@@ -25,6 +25,7 @@ import { FlyerShowPage } from './components/FlyerShowPage';
 import { MidiPageView } from './components/MidiPageView';
 import { PixCheckoutModal } from './components/PixCheckoutModal';
 import { PaymentReturnModal } from './components/PaymentReturnModal';
+import { trackSiteVisit } from './utils/analytics';
 import { SearchX, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -71,6 +72,16 @@ export default function App() {
       window.history.replaceState(null, '', '/');
     }
   }, [setIsCustomerAreaOpen]);
+
+  // Track page and category visits
+  useEffect(() => {
+    let pageLabel = 'home';
+    if (activeTopTab === 'midi_variados') pageLabel = 'midi_variados';
+    else if (activeTopTab === 'midi_gospel') pageLabel = 'midi_gospel';
+    else if (activeTopTab === 'flyer_show') pageLabel = 'flyer_show';
+
+    trackSiteVisit(pageLabel);
+  }, [activeTopTab]);
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);

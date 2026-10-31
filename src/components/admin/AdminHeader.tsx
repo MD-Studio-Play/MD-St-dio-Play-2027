@@ -18,10 +18,12 @@ import {
   Image,
   Music2,
   Disc,
+  Users,
 } from 'lucide-react';
 
 export type AdminTab =
   | 'dashboard'
+  | 'visitas'
   | 'music'
   | 'midi_variados'
   | 'midi_gospel'
@@ -60,6 +62,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
 
   const navItems = [
     { id: 'dashboard' as AdminTab, label: 'Painel Geral', icon: LayoutDashboard },
+    { id: 'visitas' as AdminTab, label: 'Visitas & Tráfego', icon: Users },
     { id: 'music' as AdminTab, label: 'Playbacks (Catálogo)', icon: Music },
     { id: 'midi_variados' as AdminTab, label: 'Página MIDI Variados', icon: Music2 },
     { id: 'midi_gospel' as AdminTab, label: 'Página MIDI Gospel', icon: Disc },

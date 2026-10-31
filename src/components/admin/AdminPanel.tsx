@@ -11,6 +11,7 @@ import { FlyerShowTab } from './FlyerShowTab';
 import { MidiVariadosTab } from './MidiVariadosTab';
 import { MidiGospelTab } from './MidiGospelTab';
 import { CheckoutTab } from './CheckoutTab';
+import { VisitasTab } from './VisitasTab';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface AdminErrorBoundaryProps {
@@ -95,6 +96,7 @@ export const AdminPanel: React.FC = () => {
           {currentTab === 'dashboard' && (
             <DashboardTab onNavigateToTab={(tab) => setCurrentTab(tab)} />
           )}
+          {currentTab === 'visitas' && <VisitasTab />}
           {currentTab === 'music' && <MusicTab />}
           {currentTab === 'midi_variados' && <MidiVariadosTab />}
           {currentTab === 'midi_gospel' && <MidiGospelTab />}

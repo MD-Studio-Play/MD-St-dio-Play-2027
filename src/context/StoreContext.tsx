@@ -14,6 +14,8 @@ import {
   CustomerUser,
   AdminCredentials,
 } from '../types/admin';
+import { VisitorAnalyticsData } from '../types/analytics';
+import { fetchVisitorStats, resetVisitorStatsApi } from '../utils/analytics';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 import {
   db,
@@ -112,6 +114,12 @@ interface StoreContextType {
   addOrder: (order: Omit<Order, 'id' | 'orderNumber' | 'date'>) => Order;
   updateOrderStatus: (orderId: string, status: 'completed' | 'pending' | 'cancelled') => void;
   deleteOrder: (orderId: string) => void;
+
+  // Visitor Analytics
+  visitorStats: VisitorAnalyticsData | null;
+  isLoadingVisitorStats: boolean;
+  refreshVisitorStats: () => Promise<void>;
+  resetVisitorStats: () => Promise<void>;
 
   // Actions
   resetCheckoutConfig: () => void;
@@ -455,6 +463,42 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pendingWhatsAppCode, setPendingWhatsAppCode] = useState<string | null>(() => {
     return localStorage.getItem('jsp_pending_wa_code') || null;
   });
+
+  // Visitor Analytics State
+  const [visitorStats, setVisitorStats] = useState<VisitorAnalyticsData | null>(null);
+  const [isLoadingVisitorStats, setIsLoadingVisitorStats] = useState<boolean>(false);
+
+  const refreshVisitorStats = async () => {
+    setIsLoadingVisitorStats(true);
+    try {
+      const stats = await fetchVisitorStats();
+      if (stats) setVisitorStats(stats);
+    } catch (e) {
+      console.debug('Failed to refresh visitor stats', e);
+    } finally {
+      setIsLoadingVisitorStats(false);
+    }
+  };
+
+  const resetVisitorStats = async () => {
+    setIsLoadingVisitorStats(true);
+    try {
+      await resetVisitorStatsApi();
+      await refreshVisitorStats();
+    } catch (e) {
+      console.debug('Failed to reset visitor stats', e);
+    } finally {
+      setIsLoadingVisitorStats(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdminMode || isAdminAuthenticated) {
+      refreshVisitorStats();
+      const interval = setInterval(refreshVisitorStats, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [isAdminMode, isAdminAuthenticated]);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
@@ -1917,6 +1961,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addOrder,
         updateOrderStatus,
         deleteOrder,
+        visitorStats,
+        isLoadingVisitorStats,
+        refreshVisitorStats,
+        resetVisitorStats,
         resetCheckoutConfig,
         resetToDefaults,
         exportConfigBackup,
